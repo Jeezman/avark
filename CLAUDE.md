@@ -35,9 +35,28 @@ tsc
 pnpm build
 ```
 
+## Mobile Builds
+
+```bash
+# Always build for android and ios and make sure it works
+pnpm tauri android dev/build -- --features vendored-openssl
+pnpm tauri ios dev/build
+```
+
 ## Key Details
 
 - Package manager: **pnpm**
 - Vite dev server runs on port **1420** (strict port, required by Tauri)
 - TypeScript strict mode is enabled with `noUnusedLocals` and `noUnusedParameters`
 - Rust edition 2021; dependencies include `serde`, `serde_json`, and `tauri-plugin-opener`
+
+## User Stories Reference
+
+See `tasks/*` for PRDs
+
+Mark each user story done when the story is complete
+
+## Testing
+
+Write tests (unit and integration).
+Never write tests for what the type system or compiler already handles.

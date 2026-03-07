@@ -1,3 +1,5 @@
+mod wallet;
+
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;

@@ -25,3 +25,19 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false, features = ["sync", "fs"] }
 
+# Ark protocol
+ark-client = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0", default-features = false, features = ["tls-webpki-roots"] }
+ark-core = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
+ark-bdk-wallet = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
+
+# Bitcoin / BIP39
+bip39 = { version = "2", features = ["rand", "zeroize"] }
+bitcoin = { version = "0.32.7", features = ["rand", "serde"] }
+zeroize = "1"
+
+# Vendor OpenSSL for Android cross-compilation (ark-bdk-wallet pulls in native-tls via esplora-client)
+openssl = { version = "0.10", features = ["vendored"], optional = true }
+
+[features]
+vendored-openssl = ["dep:openssl"]
+
