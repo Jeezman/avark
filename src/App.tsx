@@ -1,88 +1,71 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from "react";
-import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
+import { Toaster } from "sonner";
 import Splashscreen from "./Splashscreen";
+import AspConfig from "./AspConfig";
 import "./App.css";
 
 const Onboarding = lazy(() => import("./Onboarding"));
 
+type Screen = "splash" | "loading" | "onboarding" | "asp-config" | "dashboard";
+type WalletChoice = "create" | "restore";
+
 function App() {
-  const [showSplash, setShowSplash] = useState(true);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingChecked, setOnboardingChecked] = useState(false);
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [screen, setScreen] = useState<Screen>("splash");
+  const [walletChoice, setWalletChoice] = useState<WalletChoice>("create");
 
   useEffect(() => {
-    invoke<boolean>("has_seen_onboarding").then((seen) => {
-      if (!seen) setShowOnboarding(true);
-    }).catch(() => {
-      setShowOnboarding(true);
-    }).finally(() => {
-      setOnboardingChecked(true);
-    });
-  }, []);
+    if (screen !== "loading") return;
+    invoke<boolean>("has_wallet")
+      .then((exists) => {
+        setScreen(exists ? "dashboard" : "onboarding");
+      })
+      .catch(() => {
+        setScreen("onboarding");
+      });
+  }, [screen]);
 
-  const handleSplashFinished = useCallback(() => setShowSplash(false), []);
+  const handleSplashFinished = useCallback(() => setScreen("loading"), []);
 
-  const handleOnboardingFinished = useCallback(() => {
+  const handleWalletChoice = useCallback((choice: WalletChoice) => {
     invoke("set_onboarding_seen").catch(() => {});
-    setShowOnboarding(false);
+    setWalletChoice(choice);
+    setScreen("asp-config");
   }, []);
 
-  async function greet() {
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  const handleAspConnected = useCallback(() => {
+    // TODO: US-004 (create) and US-006 (restore) will use walletChoice
+    console.log(`ASP connected, wallet choice: ${walletChoice}`);
+    setScreen("dashboard");
+  }, [walletChoice]);
 
-  if (showSplash) {
-    return <Splashscreen onFinished={handleSplashFinished} />;
-  }
-
-  if (!onboardingChecked) {
-    return null;
-  }
-
-  if (showOnboarding) {
-    return (
+  let content;
+  if (screen === "splash") {
+    content = <Splashscreen onFinished={handleSplashFinished} />;
+  } else if (screen === "loading") {
+    content = null;
+  } else if (screen === "onboarding") {
+    content = (
       <Suspense fallback={null}>
-        <Onboarding onFinished={handleOnboardingFinished} />
+        <Onboarding onWalletChoice={handleWalletChoice} />
       </Suspense>
+    );
+  } else if (screen === "asp-config") {
+    content = <AspConfig onConnected={handleAspConnected} />;
+  } else {
+    content = (
+      <main className="flex flex-col items-center justify-center min-h-screen p-8">
+        <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
+        <p className="text-gray-500">Wallet loaded. Dashboard coming in US-007.</p>
+      </main>
     );
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">GO</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    <>
+      <Toaster theme="dark" position="top-center" richColors style={{ top: "env(safe-area-inset-top, 0px)" }} />
+      {content}
+    </>
   );
 }
 

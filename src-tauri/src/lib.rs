@@ -9,6 +9,8 @@ use tokio::sync::RwLock;
 struct Settings {
     #[serde(default)]
     onboarding_seen: bool,
+    #[serde(default)]
+    asp_url: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +21,8 @@ enum AppError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+    #[error("ASP connection failed: {0}")]
+    Asp(String),
 }
 
 impl Serialize for AppError {
@@ -32,9 +36,17 @@ impl Serialize for AppError {
 
 struct SettingsLock(RwLock<()>);
 
-fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+fn app_data_file(app: &tauri::AppHandle, filename: &str) -> Result<PathBuf, AppError> {
     let dir = app.path().app_data_dir().map_err(|_| AppError::NoDataDir)?;
-    Ok(dir.join("settings.json"))
+    Ok(dir.join(filename))
+}
+
+fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+    app_data_file(app, "settings.json")
+}
+
+fn wallet_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+    app_data_file(app, "wallet.json")
 }
 
 async fn read_settings(app: &tauri::AppHandle) -> Result<Settings, AppError> {
@@ -56,10 +68,6 @@ async fn write_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(
     Ok(())
 }
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
 
 #[tauri::command]
 async fn has_seen_onboarding(app: tauri::AppHandle) -> Result<bool, AppError> {
@@ -78,12 +86,67 @@ async fn set_onboarding_seen(app: tauri::AppHandle) -> Result<(), AppError> {
     write_settings(&app, &settings).await
 }
 
+#[derive(Serialize)]
+struct AspInfo {
+    network: String,
+    version: String,
+}
+
+#[tauri::command]
+async fn connect_asp(app: tauri::AppHandle, url: String) -> Result<AspInfo, AppError> {
+    let parsed = url::Url::parse(&url)
+        .map_err(|e| AppError::Asp(format!("Invalid URL: {e}")))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::Asp("URL scheme must be http or https".into()));
+    }
+    if parsed.host().is_none() {
+        return Err(AppError::Asp("URL must include a host".into()));
+    }
+
+    let mut client = ark_grpc::Client::new(url.clone());
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), client.connect())
+        .await
+        .map_err(|_| AppError::Asp("Connection timed out — is the URL correct?".into()))?
+        .map_err(|e| AppError::Asp(format!("Connection failed: {e}")))?;
+
+    let info = tokio::time::timeout(std::time::Duration::from_secs(10), client.get_info())
+        .await
+        .map_err(|_| AppError::Asp("Server info request timed out".into()))?
+        .map_err(|e| AppError::Asp(format!("Failed to get server info: {e}")))?;
+
+    // Persist ASP URL on successful connection
+    let state = app.state::<SettingsLock>();
+    let _lock = state.0.write().await;
+    let mut settings = read_settings(&app).await?;
+    settings.asp_url = Some(url);
+    write_settings(&app, &settings).await?;
+
+    Ok(AspInfo {
+        network: info.network.to_string(),
+        version: info.version,
+    })
+}
+
+#[tauri::command]
+async fn has_wallet(app: tauri::AppHandle) -> Result<bool, AppError> {
+    let path = wallet_path(&app)?;
+    Ok(tokio::fs::try_exists(&path).await.map_err(|e| {
+        eprintln!("Wallet check error: {e}");
+        e
+    }).unwrap_or(false))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(SettingsLock(RwLock::new(())))
-        .invoke_handler(tauri::generate_handler![greet, has_seen_onboarding, set_onboarding_seen])
+        .invoke_handler(tauri::generate_handler![has_seen_onboarding, set_onboarding_seen, has_wallet, connect_asp])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -380,9 +380,11 @@ dependencies = [
  "ark-bdk-wallet",
  "ark-client",
  "ark-core",
+ "ark-grpc",
  "bip39",
  "bitcoin",
  "openssl",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",
@@ -390,6 +392,7 @@ dependencies = [
  "tauri-plugin-opener",
  "thiserror 2.0.18",
  "tokio",
+ "url",
  "zeroize",
 ]
 
@@ -4026,6 +4029,7 @@ checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
 dependencies = [
  "log",
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",
