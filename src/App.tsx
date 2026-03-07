@@ -1,24 +1,56 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
 import Splashscreen from "./Splashscreen";
 import "./App.css";
 
+const Onboarding = lazy(() => import("./Onboarding"));
+
 function App() {
   const [showSplash, setShowSplash] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [greetMsg, setGreetMsg] = useState("");
   const [name, setName] = useState("");
 
+  useEffect(() => {
+    invoke<boolean>("has_seen_onboarding").then((seen) => {
+      if (!seen) setShowOnboarding(true);
+    }).catch(() => {
+      setShowOnboarding(true);
+    }).finally(() => {
+      setOnboardingChecked(true);
+    });
+  }, []);
+
   const handleSplashFinished = useCallback(() => setShowSplash(false), []);
 
+  const handleOnboardingFinished = useCallback(() => {
+    invoke("set_onboarding_seen").catch(() => {});
+    setShowOnboarding(false);
+  }, []);
+
   async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
     setGreetMsg(await invoke("greet", { name }));
   }
 
+  if (showSplash) {
+    return <Splashscreen onFinished={handleSplashFinished} />;
+  }
+
+  if (!onboardingChecked) {
+    return null;
+  }
+
+  if (showOnboarding) {
+    return (
+      <Suspense fallback={null}>
+        <Onboarding onFinished={handleOnboardingFinished} />
+      </Suspense>
+    );
+  }
+
   return (
-    <>
-      {showSplash && <Splashscreen onFinished={handleSplashFinished} />}
     <main className="container">
       <h1>Welcome to Tauri + React</h1>
 
@@ -51,7 +83,6 @@ function App() {
       </form>
       <p>{greetMsg}</p>
     </main>
-    </>
   );
 }
 
