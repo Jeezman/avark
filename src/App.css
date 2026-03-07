@@ -1,3 +1,6 @@
+@import url('https://fonts.googleapis.com/css2?family=Righteous&display=swap');
+@import "tailwindcss";
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em #747bff);
 }

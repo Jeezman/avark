@@ -1,11 +1,15 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
+import Splashscreen from "./Splashscreen";
 import "./App.css";
 
 function App() {
+  const [showSplash, setShowSplash] = useState(true);
   const [greetMsg, setGreetMsg] = useState("");
   const [name, setName] = useState("");
+
+  const handleSplashFinished = useCallback(() => setShowSplash(false), []);
 
   async function greet() {
     // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -13,6 +17,8 @@ function App() {
   }
 
   return (
+    <>
+      {showSplash && <Splashscreen onFinished={handleSplashFinished} />}
     <main className="container">
       <h1>Welcome to Tauri + React</h1>
 
@@ -45,6 +51,7 @@ function App() {
       </form>
       <p>{greetMsg}</p>
     </main>
+    </>
   );
 }
 

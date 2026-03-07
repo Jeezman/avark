@@ -2,5 +2,6 @@
     <!-- Base application theme. -->
     <style name="Theme.avark" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
+        <item name="android:windowBackground">@color/splashBackground</item>
     </style>
 </resources>
