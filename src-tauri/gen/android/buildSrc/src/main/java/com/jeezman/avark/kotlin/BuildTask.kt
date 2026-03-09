@@ -63,6 +63,11 @@ open class BuildTask : DefaultTask() {
                 args("--release")
             }
             args(listOf("--target", target))
+            // Prepend .ndk-shims to PATH so vendored OpenSSL's `make install_dev`
+            // can find cross-compilation tools like `aarch64-linux-android-ranlib`.
+            val shimsDir = File(project.projectDir, "$rootDirRel/src-tauri/.ndk-shims").absolutePath
+            val currentPath = System.getenv("PATH") ?: ""
+            environment("PATH", "$shimsDir:$currentPath")
         }.assertNormalExitValue()
     }
 }

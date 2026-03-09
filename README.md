@@ -7,64 +7,85 @@ A Bitcoin wallet for [Arkade](https://docs.arkadeos.com/) built with Tauri 2 (Re
 - [Node.js](https://nodejs.org/) (v20.19+ or v22.12+)
 - [pnpm](https://pnpm.io/)
 - [Rust](https://rustup.rs/) (1.86+)
-- [Tauri CLI](https://tauri.app/start/): `cargo install tauri-cli`
 
-### Android Development
+## Getting Started
 
-- [Android Studio](https://developer.android.com/studio) with NDK installed
-- GNU Make 4+ (macOS ships with Make 3.81 which can't build vendored OpenSSL)
-- NDK toolchain shims for OpenSSL cross-compilation
+```bash
+pnpm install
+pnpm tauri dev
+```
 
-#### Android Setup (macOS)
+## Building
 
-1. **Install GNU Make 4+**:
+### Desktop
+
+```bash
+# Dev mode (hot reload)
+pnpm tauri dev
+
+# Production build
+pnpm tauri build
+```
+
+### Android
+
+#### One-time setup (macOS)
+
+1. Install [Android Studio](https://developer.android.com/studio) and add the NDK via SDK Manager (tested with NDK `26.1.10909125`).
+
+2. Install GNU Make 4+ (macOS ships Make 3.81 which can't build vendored OpenSSL):
 
    ```bash
    brew install make
    ```
 
-2. **Add to your shell profile** (`~/.zshrc` or `~/.bashrc`):
+3. Add Android SDK paths to your shell profile (`~/.zshrc` or `~/.bashrc`):
 
    ```bash
-   export ANDROID_HOME=$HOME/Library/Android/sdk
+   export ANDROID_HOME="$HOME/Library/Android/sdk"
    export NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
-   export PATH=$PATH:$ANDROID_HOME/emulator
-   export PATH=$PATH:$ANDROID_HOME/platform-tools
-   export PATH=$PATH:$NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin
-   export MAKE="/opt/homebrew/opt/make/libexec/gnubin/make"
+   export PATH="$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools"
    ```
 
-3. **Create the `aarch64-linux-android-ranlib` symlink** (required by vendored OpenSSL):
+4. Add the Android Rust targets:
 
    ```bash
-   ln -sf $NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ranlib \
-          $NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android-ranlib
+   rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
    ```
 
-4. **Reload your shell**:
+5. Initialize the Tauri Android project (only needed once):
 
    ```bash
-   source ~/.zshrc
+   pnpm tauri android init
    ```
 
-## Commands
+The project includes NDK toolchain shims (`src-tauri/.ndk-shims/`) and Cargo config (`src-tauri/.cargo/config.toml`) that handle cross-compilation automatically — no manual NDK symlinks or env vars needed beyond the above.
+
+#### Build commands
 
 ```bash
-# Install JS dependencies
-pnpm install
-
-# Desktop dev mode (hot reload)
-pnpm tauri dev
-
-# Desktop production build
-pnpm tauri build
-
-# Android dev mode (hot reload, deploys to connected device)
+# Dev mode (deploys to connected device/emulator)
 pnpm tauri android dev -- --features vendored-openssl
 
-# Android production build
+# Production build (APK + AAB for all architectures)
 pnpm tauri android build -- --features vendored-openssl
+```
 
+The `vendored-openssl` feature compiles OpenSSL from source for Android targets. Build output:
+
+- **APK**: `src-tauri/gen/android/app/build/outputs/apk/universal/release/`
+- **AAB**: `src-tauri/gen/android/app/build/outputs/bundle/universalRelease/`
+
+### iOS
+
+```bash
+pnpm tauri ios dev
+pnpm tauri ios build
+```
+
+## Other Commands
+
+```bash
 # Frontend-only dev server (no Tauri, port 1420)
 pnpm dev
 

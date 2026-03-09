@@ -24,5 +24,6 @@ dist-ssr
 *.sw?
 
 tasks/
+NOTES.md
 src-tauri/.cargo/config.toml
 src-tauri/.ndk-shims/aarch64-linux-android-ranlib

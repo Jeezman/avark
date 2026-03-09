@@ -15,7 +15,28 @@ type Status =
   | { type: "success"; info: AspInfo }
   | { type: "error"; message: string };
 
-function AspConfig({ onConnected }: { onConnected: (info: AspInfo) => void }) {
+function AspIcon() {
+  return (
+    <div className="w-16 h-16 mb-6 rounded-2xl bg-white/10 flex items-center justify-center">
+      <svg viewBox="0 0 24 24" className="w-8 h-8 text-lime-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+        <path d="M2 12l10 5 10-5" />
+      </svg>
+    </div>
+  );
+}
+
+function LoadingSpinner() {
+  return (
+    <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  );
+}
+
+function AspConfig({ onConnected }: { onConnected: () => void }) {
   const [url, setUrl] = useState(DEFAULT_ASP_URL);
   const [status, setStatus] = useState<Status>({ type: "idle" });
 
@@ -38,8 +59,6 @@ function AspConfig({ onConnected }: { onConnected: (info: AspInfo) => void }) {
     try {
       const info = await invoke<AspInfo>("connect_asp", { url });
       setStatus({ type: "success", info });
-      toast.success(`Connected to ASP (${info.network})`);
-      setTimeout(() => onConnected(info), 1500);
     } catch (e) {
       const message = typeof e === "string" ? e : "Failed to connect to ASP";
       setStatus({ type: "error", message });
@@ -53,13 +72,7 @@ function AspConfig({ onConnected }: { onConnected: (info: AspInfo) => void }) {
   return (
     <div className="fixed inset-0 flex flex-col bg-gradient-to-br from-gray-900 to-gray-800 text-white">
       <div className="flex-1 flex flex-col items-center justify-center px-8">
-        <div className="w-16 h-16 mb-6 rounded-2xl bg-white/10 flex items-center justify-center">
-          <svg viewBox="0 0 24 24" className="w-8 h-8 text-lime-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
-        </div>
+        <AspIcon />
 
         <h1 className="text-2xl font-bold mb-2">Connect to ASP</h1>
         <p className="text-white/60 text-center mb-8 max-w-xs">
@@ -92,22 +105,28 @@ function AspConfig({ onConnected }: { onConnected: (info: AspInfo) => void }) {
             </div>
           )}
 
-          <button
-            onClick={handleConnect}
-            disabled={connecting || success || !url.trim()}
-            aria-busy={connecting}
-            className="w-full mt-4 py-4 rounded-2xl bg-lime-300 text-gray-900 text-lg font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50 disabled:active:scale-100"
-          >
-            {connecting ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Connecting...
-              </span>
-            ) : success ? "Connected" : "Connect"}
-          </button>
+          {success ? (
+            <button
+              onClick={() => onConnected()}
+              className="w-full mt-4 py-4 rounded-2xl bg-lime-300 text-gray-900 text-lg font-bold shadow-lg active:scale-95 transition-transform"
+            >
+              Continue
+            </button>
+          ) : (
+            <button
+              onClick={handleConnect}
+              disabled={connecting || !url.trim()}
+              aria-busy={connecting}
+              className="w-full mt-4 py-4 rounded-2xl bg-lime-300 text-gray-900 text-lg font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50 disabled:active:scale-100"
+            >
+              {connecting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <LoadingSpinner />
+                  Connecting...
+                </span>
+              ) : "Connect"}
+            </button>
+          )}
         </div>
       </div>
     </div>
