@@ -324,6 +324,19 @@ async fn create_wallet(app: tauri::AppHandle) -> Result<CreateWalletResult, AppE
 }
 
 #[tauri::command]
+async fn get_mnemonic(app: tauri::AppHandle) -> Result<String, AppError> {
+    let store = secure_storage::SecureStorage::get_instance(&app);
+    load_mnemonic(store)
+}
+
+#[tauri::command]
+async fn is_wallet_loaded(app: tauri::AppHandle) -> bool {
+    let state = app.state::<ArkClientState>();
+    let loaded = state.0.read().await.is_some();
+    loaded
+}
+
+#[tauri::command]
 async fn load_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
     info!("loading existing wallet");
 
@@ -364,6 +377,38 @@ async fn load_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
+#[tauri::command]
+async fn delete_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
+    warn!("deleting wallet data");
+
+    // Clear the in-memory Ark client.
+    let ark_state = app.state::<ArkClientState>();
+    *ark_state.0.write().await = None;
+
+    let store = secure_storage::SecureStorage::get_instance(&app);
+    store.delete(MNEMONIC_KEY)?;
+
+    for path in [wallet_path(&app)?, boarding_db_path(&app)?] {
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    // Reset onboarding flag so the user goes through setup again.
+    let state = app.state::<SettingsLock>();
+    let _lock = state.0.write().await;
+    let mut settings = read_settings(&app).await?;
+    settings.onboarding_seen = false;
+    settings.asp_url = None;
+    settings.network = None;
+    write_settings(&app, &settings).await?;
+
+    info!("wallet data deleted");
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     rustls::crypto::ring::default_provider()
@@ -376,7 +421,7 @@ pub fn run() {
         .manage(SettingsLock(RwLock::new(())))
         .manage(ArkClientState(RwLock::new(None)))
         .manage(WalletCreationLock(tokio::sync::Mutex::new(())))
-        .invoke_handler(tauri::generate_handler![has_seen_onboarding, set_onboarding_seen, has_wallet, connect_asp, create_wallet, load_wallet])
+        .invoke_handler(tauri::generate_handler![has_seen_onboarding, set_onboarding_seen, has_wallet, connect_asp, create_wallet, is_wallet_loaded, load_wallet, get_mnemonic, delete_wallet])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

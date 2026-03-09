@@ -36,7 +36,7 @@ function LoadingSpinner() {
   );
 }
 
-function AspConfig({ onConnected }: { onConnected: () => void }) {
+function AspConfig({ onConnected }: { onConnected: () => void | Promise<void> }) {
   const [url, setUrl] = useState(DEFAULT_ASP_URL);
   const [status, setStatus] = useState<Status>({ type: "idle" });
 
