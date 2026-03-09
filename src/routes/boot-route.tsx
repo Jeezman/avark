@@ -15,7 +15,7 @@ function loadWalletAsync(): Promise<WalletResult> {
   return invoke<boolean>("has_wallet")
     .then((exists) => {
       if (!exists) return { status: "no-wallet" } as WalletResult;
-      return invoke("load_wallet").then(
+      return invoke("load_wallet_local").then(
         () => ({ status: "loaded" }) as WalletResult,
         (error) => ({
           status: "error",
@@ -136,7 +136,7 @@ export function BootRoute() {
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
       </svg>
       <p className="text-sm text-white/60">
-        {stage === "loading-wallet" ? "Loading wallet..." : "Checking wallet..."}
+        {stage === "loading-wallet" ? "Unlocking wallet..." : "Checking wallet..."}
       </p>
     </div>
   );

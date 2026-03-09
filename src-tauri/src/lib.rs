@@ -177,6 +177,29 @@ async fn has_wallet(app: tauri::AppHandle) -> Result<bool, AppError> {
     Ok(tokio::fs::try_exists(&path).await?)
 }
 
+async fn read_wallet_data(app: &tauri::AppHandle) -> Result<WalletData, AppError> {
+    let path = wallet_path(app)?;
+    let raw = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| AppError::Wallet(format!("Failed to read wallet.json: {e}")))?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+fn derive_wallet_xpriv(
+    app: &tauri::AppHandle,
+    wallet_data: &WalletData,
+) -> Result<bitcoin::bip32::Xpriv, AppError> {
+    let network = wallet_data
+        .network
+        .parse::<bitcoin::Network>()
+        .map_err(|e| AppError::Wallet(format!("Invalid network \"{}\": {e}", wallet_data.network)))?;
+
+    let store = secure_storage::SecureStorage::get_instance(app);
+    let mnemonic_words = load_mnemonic(store)?;
+    wallet::derive_master_xpriv(&mnemonic_words, network)
+        .map_err(|e| AppError::Wallet(e.to_string()))
+}
+
 /// Build and connect an Ark client from an Xpriv and ASP URL.
 async fn build_ark_client(
     app: &tauri::AppHandle,
@@ -287,11 +310,8 @@ async fn create_wallet(app: tauri::AppHandle) -> Result<CreateWalletResult, AppE
         .map_err(|e| AppError::Wallet(e.to_string()))?;
     let mnemonic_words = secret.words().to_owned();
 
-    let mut seed = secret.mnemonic().to_seed("");
-    let xpriv = bitcoin::bip32::Xpriv::new_master(network, &seed)
-        .map_err(|e| AppError::Wallet(format!("Key derivation failed: {e}")))?;
-    zeroize::Zeroize::zeroize(&mut seed);
-
+    let xpriv = wallet::derive_master_xpriv_from_secret(&secret, network)
+        .map_err(|e| AppError::Wallet(e.to_string()))?;
 
     // Connect to ASP
     let client = build_ark_client(&app, xpriv, &asp_url).await?;
@@ -330,6 +350,20 @@ async fn get_mnemonic(app: tauri::AppHandle) -> Result<String, AppError> {
 }
 
 #[tauri::command]
+async fn load_wallet_local(app: tauri::AppHandle) -> Result<(), AppError> {
+    info!("validating local wallet state");
+
+    let _wallet_data = read_wallet_data(&app).await?;
+    let store = secure_storage::SecureStorage::get_instance(&app);
+    let mut words = load_mnemonic(store)?;
+    wallet::parse_mnemonic(&words).map_err(|e| AppError::Wallet(e.to_string()))?;
+    zeroize::Zeroize::zeroize(&mut words);
+
+    info!("local wallet state is ready");
+    Ok(())
+}
+
+#[tauri::command]
 async fn is_wallet_loaded(app: tauri::AppHandle) -> bool {
     let state = app.state::<ArkClientState>();
     let loaded = state.0.read().await.is_some();
@@ -337,43 +371,28 @@ async fn is_wallet_loaded(app: tauri::AppHandle) -> bool {
 }
 
 #[tauri::command]
-async fn load_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
-    info!("loading existing wallet");
+async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
+    info!("connecting wallet to ASP");
 
-    // If the client is already initialized, nothing to do.
+    // Serialize connection attempts to prevent races
+    let creation_lock = app.state::<WalletCreationLock>();
+    let _guard = creation_lock.0.lock().await;
+
     let ark_state = app.state::<ArkClientState>();
     if ark_state.0.read().await.is_some() {
-        debug!("Ark client already initialized, skipping load");
+        debug!("Ark client already initialized, skipping connect");
         return Ok(());
     }
 
-    // Read wallet metadata from disk.
-    let path = wallet_path(&app)?;
-    let raw = tokio::fs::read_to_string(&path)
-        .await
-        .map_err(|e| AppError::Wallet(format!("Failed to read wallet.json: {e}")))?;
-    let wallet_data: WalletData = serde_json::from_str(&raw)?;
-
-    let network = wallet_data.network.parse::<bitcoin::Network>()
-        .map_err(|e| AppError::Wallet(format!("Invalid network \"{}\": {e}", wallet_data.network)))?;
-
-    // Load mnemonic from secure storage and derive keys.
-    let store = secure_storage::SecureStorage::get_instance(&app);
-    let mnemonic_words = load_mnemonic(store)?;
-    let mnemonic = bip39::Mnemonic::parse_normalized(&mnemonic_words)
-        .map_err(|e| AppError::Wallet(format!("Invalid stored mnemonic: {e}")))?;
-
-    let mut seed = mnemonic.to_seed("");
-    let xpriv = bitcoin::bip32::Xpriv::new_master(network, &seed)
-        .map_err(|e| AppError::Wallet(format!("Key derivation failed: {e}")))?;
-    zeroize::Zeroize::zeroize(&mut seed);
+    let wallet_data = read_wallet_data(&app).await?;
+    let xpriv = derive_wallet_xpriv(&app, &wallet_data)?;
 
     // Rebuild and connect the Ark client.
     let client = build_ark_client(&app, xpriv, &wallet_data.asp_url).await?;
 
     *ark_state.0.write().await = Some(client);
 
-    info!("wallet loaded successfully");
+    info!("wallet connected successfully");
     Ok(())
 }
 
@@ -421,7 +440,7 @@ pub fn run() {
         .manage(SettingsLock(RwLock::new(())))
         .manage(ArkClientState(RwLock::new(None)))
         .manage(WalletCreationLock(tokio::sync::Mutex::new(())))
-        .invoke_handler(tauri::generate_handler![has_seen_onboarding, set_onboarding_seen, has_wallet, connect_asp, create_wallet, is_wallet_loaded, load_wallet, get_mnemonic, delete_wallet])
+        .invoke_handler(tauri::generate_handler![has_seen_onboarding, set_onboarding_seen, has_wallet, connect_asp, create_wallet, load_wallet_local, is_wallet_loaded, connect_wallet, get_mnemonic, delete_wallet])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

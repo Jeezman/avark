@@ -29,8 +29,8 @@ const dashboardRoute = createRoute({
   path: "/dashboard",
   component: DashboardRoute,
   async beforeLoad() {
-    const loaded = await invoke<boolean>("is_wallet_loaded");
-    if (!loaded) {
+    const exists = await invoke<boolean>("has_wallet");
+    if (!exists) {
       throw redirect({ to: "/", replace: true });
     }
   },
