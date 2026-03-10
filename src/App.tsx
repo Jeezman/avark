@@ -1,88 +1,14 @@
-import { useState, useCallback, useEffect, lazy, Suspense } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import Splashscreen from "./Splashscreen";
+import { RouterProvider } from "@tanstack/react-router";
+import { Toaster } from "sonner";
+import { router } from "./router";
 import "./App.css";
 
-const Onboarding = lazy(() => import("./Onboarding"));
-
 function App() {
-  const [showSplash, setShowSplash] = useState(true);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingChecked, setOnboardingChecked] = useState(false);
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
-
-  useEffect(() => {
-    invoke<boolean>("has_seen_onboarding").then((seen) => {
-      if (!seen) setShowOnboarding(true);
-    }).catch(() => {
-      setShowOnboarding(true);
-    }).finally(() => {
-      setOnboardingChecked(true);
-    });
-  }, []);
-
-  const handleSplashFinished = useCallback(() => setShowSplash(false), []);
-
-  const handleOnboardingFinished = useCallback(() => {
-    invoke("set_onboarding_seen").catch(() => {});
-    setShowOnboarding(false);
-  }, []);
-
-  async function greet() {
-    setGreetMsg(await invoke("greet", { name }));
-  }
-
-  if (showSplash) {
-    return <Splashscreen onFinished={handleSplashFinished} />;
-  }
-
-  if (!onboardingChecked) {
-    return null;
-  }
-
-  if (showOnboarding) {
-    return (
-      <Suspense fallback={null}>
-        <Onboarding onFinished={handleOnboardingFinished} />
-      </Suspense>
-    );
-  }
-
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">GO</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    <>
+      <Toaster theme="dark" position="top-center" richColors style={{ top: "env(safe-area-inset-top, 0px)" }} />
+      <RouterProvider router={router} />
+    </>
   );
 }
 

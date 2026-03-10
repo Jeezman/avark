@@ -25,13 +25,13 @@ const slides = [
   {
     title: "Get Started",
     description:
-      "Set up your wallet in seconds and start using Bitcoin the way it was meant to be.",
+      "Create a new wallet or restore an existing one to start using Bitcoin the way it was meant to be.",
     gradient: "from-purple-400 via-violet-300 to-emerald-200",
     illustration: SlideFourIllustration,
   },
 ];
 
-function Onboarding({ onFinished }: { onFinished: () => void }) {
+function Onboarding({ onWalletChoice }: { onWalletChoice: (choice: "create" | "restore") => void }) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [offsetX, setOffsetX] = useState(0);
   const [animate, setAnimate] = useState(false);
@@ -84,7 +84,6 @@ function Onboarding({ onFinished }: { onFinished: () => void }) {
       const tapX = e.changedTouches[0].clientX;
       const screenMid = window.innerWidth / 2;
       if (tapX < screenMid) goTo(currentSlide - 1);
-      else if (currentSlide === slides.length - 1) onFinished();
       else goTo(currentSlide + 1);
     }
   };
@@ -129,12 +128,18 @@ function Onboarding({ onFinished }: { onFinished: () => void }) {
       </div>
 
       {currentSlide === slides.length - 1 && (
-        <div className="px-8" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 12px) + 24px)" }}>
+        <div className="px-8 flex flex-col gap-3" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 12px) + 24px)" }}>
           <button
-            onClick={onFinished}
+            onClick={() => onWalletChoice("create")}
             className="w-full py-4 rounded-2xl bg-lime-300 text-gray-900 text-lg font-bold shadow-lg active:scale-95 transition-transform"
           >
-            Get Started
+            Create New Wallet
+          </button>
+          <button
+            onClick={() => onWalletChoice("restore")}
+            className="w-full py-4 rounded-2xl bg-white/20 text-white text-lg font-bold shadow-lg active:scale-95 transition-transform backdrop-blur-sm"
+          >
+            Restore Wallet
           </button>
         </div>
       )}

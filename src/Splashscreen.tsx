@@ -1,21 +1,8 @@
 import { useState, useEffect } from "react";
 
-function Splashscreen({ onFinished }: { onFinished: () => void }) {
-  const [fading, setFading] = useState(false);
-
-  useEffect(() => {
-    const fadeTimer = setTimeout(() => setFading(true), 3000);
-    const removeTimer = setTimeout(() => onFinished(), 3400);
-    return () => {
-      clearTimeout(fadeTimer);
-      clearTimeout(removeTimer);
-    };
-  }, [onFinished]);
-
+function SplashLogo() {
   return (
-    <div
-      className={`fixed inset-0 z-9999 flex flex-col items-center justify-center bg-[#F7931A] overflow-hidden touch-none transition-opacity duration-400 ease-out ${fading ? "opacity-0 pointer-events-none" : "opacity-100"}`}
-    >
+    <>
       <svg
         className="w-40 h-40"
         viewBox="0 0 200 200"
@@ -53,6 +40,27 @@ function Splashscreen({ onFinished }: { onFinished: () => void }) {
       <h1 className="mt-4 font-['Righteous',cursive] text-[2.8rem] text-white tracking-wider drop-shadow-[0_2px_8px_rgba(0,0,0,0.15)]">
         Avark
       </h1>
+    </>
+  );
+}
+
+function Splashscreen({ onFinished }: { onFinished: () => void }) {
+  const [fading, setFading] = useState(false);
+
+  useEffect(() => {
+    const fadeTimer = setTimeout(() => setFading(true), 3000);
+    const removeTimer = setTimeout(() => onFinished(), 3400);
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(removeTimer);
+    };
+  }, [onFinished]);
+
+  return (
+    <div
+      className={`fixed inset-0 z-9999 flex flex-col items-center justify-center bg-[#F7931A] overflow-hidden touch-none transition-opacity duration-400 ease-out ${fading ? "opacity-0 pointer-events-none" : "opacity-100"}`}
+    >
+      <SplashLogo />
     </div>
   );
 }
