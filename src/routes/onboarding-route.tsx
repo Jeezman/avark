@@ -6,12 +6,14 @@ import AspConfig from "../AspConfig";
 
 const Onboarding = lazy(() => import("../Onboarding"));
 const SeedBackup = lazy(() => import("../SeedBackup"));
+const RestoreWallet = lazy(() => import("../RestoreWallet"));
 
 type OnboardingStage =
   | { step: "intro" }
   | { step: "asp-config" }
   | { step: "creating-wallet" }
-  | { step: "seed-backup"; mnemonic: string };
+  | { step: "seed-backup"; mnemonic: string }
+  | { step: "restore-mnemonic" };
 type WalletChoice = "create" | "restore";
 
 function CreatingWalletScreen() {
@@ -38,9 +40,11 @@ export function OnboardingRoute() {
     setStage({ step: "asp-config" });
   }, []);
 
+  const [restoring, setRestoring] = useState(false);
+
   const handleAspConnected = useCallback(async () => {
-    if (walletChoice !== "create") {
-      void navigate({ to: "/dashboard", replace: true });
+    if (walletChoice === "restore") {
+      setStage({ step: "restore-mnemonic" });
       return;
     }
 
@@ -54,7 +58,19 @@ export function OnboardingRoute() {
       toast.error(message);
       setStage({ step: "asp-config" });
     }
-  }, [navigate, walletChoice]);
+  }, [walletChoice]);
+
+  const handleRestore = useCallback(async (mnemonic: string) => {
+    setRestoring(true);
+    try {
+      await invoke("restore_wallet", { mnemonic });
+      void navigate({ to: "/dashboard", replace: true });
+    } catch (error) {
+      const message = typeof error === "string" ? error : "Failed to restore wallet";
+      toast.error(message);
+      setRestoring(false);
+    }
+  }, [navigate]);
 
   switch (stage.step) {
     case "intro":
@@ -74,6 +90,12 @@ export function OnboardingRoute() {
             mnemonic={stage.mnemonic}
             onDone={() => void navigate({ to: "/dashboard", replace: true })}
           />
+        </Suspense>
+      );
+    case "restore-mnemonic":
+      return (
+        <Suspense fallback={null}>
+          <RestoreWallet onRestore={handleRestore} restoring={restoring} />
         </Suspense>
       );
   }

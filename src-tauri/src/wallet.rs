@@ -5,6 +5,7 @@ use bitcoin::Network;
 use serde::Serialize;
 use zeroize::Zeroize;
 
+#[allow(dead_code)]
 /// BIP-86 Taproot derivation path: m/86'/{coin}'/{account}'/0/{index}
 ///
 /// - `account`: hardened account index (0, 1, 2, …)
@@ -77,7 +78,15 @@ pub fn generate_mnemonic() -> Result<SecretMnemonic, WalletError> {
 }
 
 /// Parse and validate a BIP39 mnemonic string.
+///
+/// Accepts 12- or 24-word mnemonics only. The checksum is verified by the
+/// `bip39` crate; this function additionally rejects non-standard word counts
+/// that BIP39 technically allows (15, 18, 21) but that Avark does not support.
 pub fn parse_mnemonic(words: &str) -> Result<SecretMnemonic, WalletError> {
+    let word_count = words.split_whitespace().count();
+    if word_count != 12 && word_count != 24 {
+        return Err(WalletError::Mnemonic(bip39::Error::BadWordCount(word_count)));
+    }
     let mnemonic = Mnemonic::parse_normalized(words.trim())?;
     let words = mnemonic.to_string();
     Ok(SecretMnemonic { words, mnemonic })
@@ -98,6 +107,7 @@ pub fn derive_master_xpriv_from_secret(secret: &SecretMnemonic, network: Network
     Ok(xpriv)
 }
 
+#[allow(dead_code)]
 /// Derive an extended private key at a specific BIP-32 derivation path.
 ///
 /// Uses an empty BIP39 passphrase (the spec-default). This is intentional:
@@ -117,6 +127,7 @@ pub fn derive_xpriv(
     Ok(derived)
 }
 
+#[allow(dead_code)]
 /// Derive a secp256k1 keypair at a specific BIP-32 derivation path.
 pub fn derive_keypair(
     mnemonic: &SecretMnemonic,
@@ -125,7 +136,7 @@ pub fn derive_keypair(
 ) -> Result<bitcoin::key::Keypair, WalletError> {
     let secp = Secp256k1::signing_only();
     let xpriv = derive_xpriv(mnemonic, network, path)?;
-    Ok(bitcoin::key::Keypair::from_secret_key(&secp, &xpriv.private_key.into()))
+    Ok(bitcoin::key::Keypair::from_secret_key(&secp, &xpriv.private_key))
 }
 
 #[cfg(test)]
