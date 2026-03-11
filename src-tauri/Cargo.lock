@@ -401,6 +401,7 @@ dependencies = [
  "bip39",
  "bitcoin",
  "esplora-client",
+ "futures-util",
  "keyring",
  "openssl",
  "rand 0.8.5",

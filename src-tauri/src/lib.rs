@@ -212,6 +212,9 @@ pub fn run() {
         .manage(SettingsLock(RwLock::new(())))
         .manage(GlobalWalletState(RwLock::new(None)))
         .manage(WalletCreationLock(tokio::sync::Mutex::new(())))
+        .manage(commands::receive::ReceiveSubscriptionState(
+            tokio::sync::Mutex::new(None),
+        ))
         .invoke_handler(tauri::generate_handler![
             // Onboarding
             has_seen_onboarding,
@@ -235,6 +238,9 @@ pub fn run() {
             commands::lightning::get_ln_invoice,
             commands::lightning::debug_list_swaps,
             commands::lightning::debug_claim_swap,
+            // Receive subscription
+            commands::receive::start_receive_subscription,
+            commands::receive::stop_receive_subscription,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

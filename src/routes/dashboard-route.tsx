@@ -213,9 +213,12 @@ export function DashboardRoute() {
     const unlisteners = [
       listen<{ amount_sat: number }>('payment-received', (event) => {
         toast.success(
-          `Received ${event.payload.amount_sat.toLocaleString()} sats via Lightning`,
+          `Received ${event.payload.amount_sat.toLocaleString()} sats`,
         );
-        void fetchData();
+        // Small delay before refreshing: for Lightning claims the ASP may
+        // not reflect the new VTXO in offchain_balance() immediately after
+        // claim_vhtlc completes.
+        setTimeout(() => void fetchData(), 1500);
       }),
       listen<string>('ln-swap-error', (event) => {
         toast.error(event.payload);

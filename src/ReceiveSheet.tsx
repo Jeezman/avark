@@ -161,10 +161,19 @@ function ReceiveSheetContent() {
 
   useEffect(() => {
     let cancelled = false;
+    // Track the in-flight subscription start so cleanup can wait for it.
+    let subscriptionStarted: Promise<unknown> = Promise.resolve();
 
     invoke<ReceiveAddresses>('get_receive_address')
       .then((result) => {
-        if (!cancelled) setAddresses(result);
+        if (cancelled) return;
+        setAddresses(result);
+        // Subscribe to the exact address we're displaying in the QR code.
+        subscriptionStarted = invoke('start_receive_subscription', {
+          arkAddress: result.ark_address,
+        }).catch((err) => {
+          console.warn('Failed to start receive subscription:', err);
+        });
       })
       .catch((err) => {
         if (!cancelled) {
@@ -178,6 +187,12 @@ function ReceiveSheetContent() {
 
     return () => {
       cancelled = true;
+      // Wait for any in-flight start to finish, then stop.
+      void subscriptionStarted.then(() =>
+        invoke('stop_receive_subscription').catch((err) => {
+          console.warn('Failed to stop receive subscription:', err);
+        }),
+      );
     };
   }, []);
 
