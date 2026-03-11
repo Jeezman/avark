@@ -85,7 +85,9 @@ pub fn generate_mnemonic() -> Result<SecretMnemonic, WalletError> {
 pub fn parse_mnemonic(words: &str) -> Result<SecretMnemonic, WalletError> {
     let word_count = words.split_whitespace().count();
     if word_count != 12 && word_count != 24 {
-        return Err(WalletError::Mnemonic(bip39::Error::BadWordCount(word_count)));
+        return Err(WalletError::Mnemonic(bip39::Error::BadWordCount(
+            word_count,
+        )));
     }
     let mnemonic = Mnemonic::parse_normalized(words.trim())?;
     let words = mnemonic.to_string();
@@ -100,7 +102,10 @@ pub fn derive_master_xpriv(words: &str, network: Network) -> Result<Xpriv, Walle
 
 /// Derive the master extended private key from an already-parsed [`SecretMnemonic`],
 /// avoiding a redundant string copy when the caller already holds one.
-pub fn derive_master_xpriv_from_secret(secret: &SecretMnemonic, network: Network) -> Result<Xpriv, WalletError> {
+pub fn derive_master_xpriv_from_secret(
+    secret: &SecretMnemonic,
+    network: Network,
+) -> Result<Xpriv, WalletError> {
     let mut seed = secret.mnemonic().to_seed("");
     let xpriv = Xpriv::new_master(network, &seed)?;
     seed.zeroize();
@@ -136,7 +141,10 @@ pub fn derive_keypair(
 ) -> Result<bitcoin::key::Keypair, WalletError> {
     let secp = Secp256k1::signing_only();
     let xpriv = derive_xpriv(mnemonic, network, path)?;
-    Ok(bitcoin::key::Keypair::from_secret_key(&secp, &xpriv.private_key))
+    Ok(bitcoin::key::Keypair::from_secret_key(
+        &secp,
+        &xpriv.private_key,
+    ))
 }
 
 #[cfg(test)]
@@ -167,7 +175,8 @@ mod tests {
     fn derive_master_xpriv_is_stable_for_same_words() {
         let words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let first = derive_master_xpriv(words, Network::Bitcoin).expect("should derive master key");
-        let second = derive_master_xpriv(words, Network::Bitcoin).expect("should derive master key");
+        let second =
+            derive_master_xpriv(words, Network::Bitcoin).expect("should derive master key");
         assert_eq!(first, second);
     }
 
@@ -175,16 +184,20 @@ mod tests {
     fn derive_master_xpriv_trims_whitespace() {
         let words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let padded = "  abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about  ";
-        let clean = derive_master_xpriv(words, Network::Bitcoin).expect("should derive clean master key");
-        let trimmed = derive_master_xpriv(padded, Network::Bitcoin).expect("should ignore surrounding whitespace");
+        let clean =
+            derive_master_xpriv(words, Network::Bitcoin).expect("should derive clean master key");
+        let trimmed = derive_master_xpriv(padded, Network::Bitcoin)
+            .expect("should ignore surrounding whitespace");
         assert_eq!(clean, trimmed);
     }
 
     #[test]
     fn derive_master_xpriv_changes_across_networks() {
         let words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let bitcoin = derive_master_xpriv(words, Network::Bitcoin).expect("should derive bitcoin master key");
-        let testnet = derive_master_xpriv(words, Network::Testnet).expect("should derive testnet master key");
+        let bitcoin =
+            derive_master_xpriv(words, Network::Bitcoin).expect("should derive bitcoin master key");
+        let testnet =
+            derive_master_xpriv(words, Network::Testnet).expect("should derive testnet master key");
         assert_ne!(bitcoin, testnet);
     }
 
