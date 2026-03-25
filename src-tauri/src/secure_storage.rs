@@ -123,7 +123,13 @@ impl SecureStorage {
     pub fn get(&self, key: &str) -> Result<Option<String>, Error> {
         let resp: PluginGetResponse = self
             .plugin
-            .run_mobile_plugin("get", PluginArgs { key: key.to_string(), value: None })
+            .run_mobile_plugin(
+                "get",
+                PluginArgs {
+                    key: key.to_string(),
+                    value: None,
+                },
+            )
             .map_err(|e| Error::Plugin(e.to_string()))?;
         Ok(resp.value)
     }
@@ -144,7 +150,10 @@ impl SecureStorage {
         self.plugin
             .run_mobile_plugin::<()>(
                 "remove",
-                PluginArgs { key: key.to_string(), value: None },
+                PluginArgs {
+                    key: key.to_string(),
+                    value: None,
+                },
             )
             .map_err(|e| Error::Plugin(e.to_string()))
     }
@@ -157,7 +166,8 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .setup(|app, _api| {
             #[cfg(target_os = "android")]
             {
-                let handle = _api.register_android_plugin(PLUGIN_IDENTIFIER, "SecureStoragePlugin")?;
+                let handle =
+                    _api.register_android_plugin(PLUGIN_IDENTIFIER, "SecureStoragePlugin")?;
                 app.manage(SecureStorage { plugin: handle });
             }
             #[cfg(not(target_os = "android"))]

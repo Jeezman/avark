@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
 import Splashscreen from "../Splashscreen";
 
-type BootStage = "splash" | "loading" | "loading-wallet" | "wallet-error";
+type BootStage = "splash" | "loading-wallet" | "wallet-error";
 
 type WalletResult =
   | { status: "no-wallet" }
@@ -38,20 +38,22 @@ export function BootRoute() {
   const walletResultRef = useRef<Promise<WalletResult> | null>(null);
   const splashDoneRef = useRef(false);
 
-  // Start wallet loading immediately on mount (runs in parallel with splash).
+  // Kick off wallet loading on mount so it runs in parallel with the splash
+  // animation. The promise is stashed in a ref so the effect below can await
+  // it once the splash finishes — the ref is set synchronously before the
+  // second effect runs within the same render cycle.
   useEffect(() => {
     walletResultRef.current = loadWalletAsync();
   }, []);
 
-  // Once splash finishes, consume the wallet result (or wait for it).
+  // Once splash finishes (loadAttempt incremented by handleSplashFinished),
+  // consume the pre-started wallet promise, or start a fresh one on retry.
   useEffect(() => {
     if (!splashDoneRef.current) return;
 
     let cancelled = false;
     const promise = walletResultRef.current ?? loadWalletAsync();
     walletResultRef.current = promise;
-
-    setStage("loading-wallet");
 
     promise.then((result) => {
       if (cancelled) return;
@@ -72,11 +74,13 @@ export function BootRoute() {
 
   const handleSplashFinished = useCallback(() => {
     splashDoneRef.current = true;
+    setStage("loading-wallet");
     setLoadAttempt((count) => count + 1);
   }, []);
 
   const handleRetryLoad = useCallback(() => {
     setWalletError(null);
+    setStage("loading-wallet");
     walletResultRef.current = loadWalletAsync();
     setLoadAttempt((count) => count + 1);
   }, []);
@@ -136,7 +140,7 @@ export function BootRoute() {
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
       </svg>
       <p className="text-sm text-white/60">
-        {stage === "loading-wallet" ? "Unlocking wallet..." : "Checking wallet..."}
+        Unlocking wallet...
       </p>
     </div>
   );

@@ -50,6 +50,8 @@ pnpm tauri ios dev/build
 - TypeScript strict mode is enabled with `noUnusedLocals` and `noUnusedParameters`
 - Rust edition 2021; dependencies include `serde`, `serde_json`, and `tauri-plugin-opener`
 
+- run cargo fmt for .rs created or updated
+
 ## User Stories Reference
 
 See `tasks/*` for PRDs

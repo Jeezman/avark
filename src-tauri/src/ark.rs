@@ -138,7 +138,9 @@ struct BoardingRecord {
 
 /// Serializable map of owner public key → secret key.
 #[derive(Default, Serialize, Deserialize)]
-struct BoardingKeys(std::collections::HashMap<bitcoin::XOnlyPublicKey, bitcoin::secp256k1::SecretKey>);
+struct BoardingKeys(
+    std::collections::HashMap<bitcoin::XOnlyPublicKey, bitcoin::secp256k1::SecretKey>,
+);
 
 /// Abstraction over secret key storage so production code uses the cross-platform
 /// `SecureStorage` and tests use an in-memory store.
@@ -157,7 +159,9 @@ impl KeyStore for PlatformKeyStore {
             Ok(Some(mut json)) => {
                 let keys = serde_json::from_str(&json);
                 json.zeroize();
-                keys.map_err(|e| Error::consumer(format!("bad boarding keys in secure storage: {e}")))
+                keys.map_err(|e| {
+                    Error::consumer(format!("bad boarding keys in secure storage: {e}"))
+                })
             }
             Ok(None) => Ok(BoardingKeys::default()),
             Err(e) => Err(Error::consumer(format!("secure storage read error: {e}"))),
@@ -167,7 +171,8 @@ impl KeyStore for PlatformKeyStore {
     fn save_keys(&self, keys: &BoardingKeys) -> Result<(), Error> {
         let mut json = serde_json::to_string(keys)
             .map_err(|e| Error::consumer(format!("serialize error: {e}")))?;
-        let result = self.0
+        let result = self
+            .0
             .set(BOARDING_KEYS_ENTRY, &json)
             .map_err(|e| Error::consumer(format!("secure storage write error: {e}")));
         json.zeroize();
@@ -205,7 +210,12 @@ impl FileDb {
         server_pk: bitcoin::XOnlyPublicKey,
         secure_storage: crate::secure_storage::SecureStorage,
     ) -> Result<Self, Error> {
-        Self::load_with_key_store(path, network, server_pk, Box::new(PlatformKeyStore(secure_storage)))
+        Self::load_with_key_store(
+            path,
+            network,
+            server_pk,
+            Box::new(PlatformKeyStore(secure_storage)),
+        )
     }
 
     fn load_with_key_store(
@@ -218,8 +228,8 @@ impl FileDb {
 
         let entries = match std::fs::read_to_string(&path) {
             Ok(data) => {
-                let records: Vec<BoardingRecord> =
-                    serde_json::from_str(&data).map_err(|e| Error::consumer(format!("bad boarding db: {e}")))?;
+                let records: Vec<BoardingRecord> = serde_json::from_str(&data)
+                    .map_err(|e| Error::consumer(format!("bad boarding db: {e}")))?;
                 let secp = bitcoin::key::Secp256k1::verification_only();
                 let mut entries = Vec::with_capacity(records.len());
                 for r in records {
@@ -236,15 +246,26 @@ impl FileDb {
                         bitcoin::Sequence(r.exit_delay),
                         network,
                     )
-                    .map_err(|e| Error::consumer(format!("failed to reconstruct boarding output: {e}")))?;
-                    entries.push(BoardingEntry { record: r, secret_key: sk, output });
+                    .map_err(|e| {
+                        Error::consumer(format!("failed to reconstruct boarding output: {e}"))
+                    })?;
+                    entries.push(BoardingEntry {
+                        record: r,
+                        secret_key: sk,
+                        output,
+                    });
                 }
                 entries
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(Error::consumer(format!("failed to read boarding db: {e}"))),
         };
-        Ok(Self { path, server_pk, key_store, entries: RwLock::new(entries) })
+        Ok(Self {
+            path,
+            server_pk,
+            key_store,
+            entries: RwLock::new(entries),
+        })
     }
 
     /// Flush public records to disk and secret keys to the key store.
@@ -287,7 +308,8 @@ impl Persistence for FileDb {
         sk: bitcoin::secp256k1::SecretKey,
         boarding_output: ark_core::BoardingOutput,
     ) -> Result<(), Error> {
-        let mut guard = self.entries
+        let mut guard = self
+            .entries
             .write()
             .map_err(|e| Error::consumer(format!("failed to get write lock: {e}")))?;
 
@@ -301,7 +323,11 @@ impl Persistence for FileDb {
             owner: boarding_output.owner_pk(),
             exit_delay: boarding_output.exit_delay().to_consensus_u32(),
         };
-        let entry = BoardingEntry { record, secret_key: sk, output: boarding_output };
+        let entry = BoardingEntry {
+            record,
+            secret_key: sk,
+            output: boarding_output,
+        };
 
         // Build a snapshot that includes the new entry, flush it, and only
         // then commit to in-memory state.  This prevents in-memory state
@@ -324,12 +350,21 @@ impl Persistence for FileDb {
             .collect())
     }
 
-    fn sk_for_pk(&self, pk: &bitcoin::XOnlyPublicKey) -> Result<bitcoin::secp256k1::SecretKey, Error> {
+    fn sk_for_pk(
+        &self,
+        pk: &bitcoin::XOnlyPublicKey,
+    ) -> Result<bitcoin::secp256k1::SecretKey, Error> {
         self.entries
             .read()
             .map_err(|e| Error::consumer(format!("failed to get read lock: {e}")))?
             .iter()
-            .find_map(|e| if e.output.owner_pk() == *pk { Some(e.secret_key) } else { None })
+            .find_map(|e| {
+                if e.output.owner_pk() == *pk {
+                    Some(e.secret_key)
+                } else {
+                    None
+                }
+            })
             .ok_or_else(|| Error::consumer(format!("could not find SK for PK {pk}")))
     }
 }
@@ -338,7 +373,7 @@ pub type ArkWallet = ark_bdk_wallet::Wallet<FileDb>;
 pub type ArkClient = ark_client::Client<
     EsploraBlockchain,
     ArkWallet,
-    ark_client::InMemorySwapStorage,
+    ark_client::SqliteSwapStorage,
     ark_client::Bip32KeyProvider,
 >;
 
@@ -388,14 +423,11 @@ mod tests {
 
     /// Create a test FileDb in a unique temp directory with deterministic keys
     /// and an in-memory key store.
-    fn test_db() -> Result<(FileDb, bitcoin::XOnlyPublicKey, SecretKey), Box<dyn std::error::Error>> {
+    fn test_db() -> Result<(FileDb, bitcoin::XOnlyPublicKey, SecretKey), Box<dyn std::error::Error>>
+    {
         let secp = Secp256k1::new();
         let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "avark-test-{}-{}",
-            std::process::id(),
-            id
-        ));
+        let dir = std::env::temp_dir().join(format!("avark-test-{}-{}", std::process::id(), id));
         let path = dir.join("boarding.json");
 
         let server_sk = SecretKey::from_str(
@@ -486,11 +518,7 @@ mod tests {
         )?;
 
         let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "avark-test-{}-{}",
-            std::process::id(),
-            id
-        ));
+        let dir = std::env::temp_dir().join(format!("avark-test-{}-{}", std::process::id(), id));
         let path = dir.join("boarding.json");
 
         // Shared key store that survives across FileDb instances.
@@ -538,8 +566,7 @@ mod tests {
         let sk = SecretKey::from_str(
             "0000000000000000000000000000000000000000000000000000000000000001",
         )?;
-        let (pk, _) =
-            bitcoin::secp256k1::Keypair::from_secret_key(&secp, &sk).x_only_public_key();
+        let (pk, _) = bitcoin::secp256k1::Keypair::from_secret_key(&secp, &sk).x_only_public_key();
 
         let db = FileDb::load_with_key_store(
             path,
@@ -577,11 +604,7 @@ mod tests {
         )?;
 
         let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "avark-test-{}-{}",
-            std::process::id(),
-            id
-        ));
+        let path = std::env::temp_dir().join(format!("avark-test-{}-{}", std::process::id(), id));
         let path = path.join("boarding.json");
 
         let db = FileDb::load_with_key_store(
@@ -609,4 +632,3 @@ mod tests {
         assert!(esplora_url(bitcoin::Network::Regtest).starts_with("http://localhost"));
     }
 }
-

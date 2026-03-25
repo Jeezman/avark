@@ -26,7 +26,7 @@ thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false, features = ["sync", "fs", "time"] }
 
 # Ark protocol
-ark-client = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0", default-features = false, features = ["tls-webpki-roots"] }
+ark-client = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0", default-features = false, features = ["tls-webpki-roots", "sqlite"] }
 ark-core = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
 ark-bdk-wallet = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
 ark-grpc = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
@@ -34,12 +34,16 @@ ark-grpc = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
 # Bitcoin / BIP39
 bip39 = { version = "2", features = ["rand", "zeroize"] }
 bitcoin = { version = "0.32.7", features = ["rand", "serde"] }
+rand = "0.8"
 zeroize = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 url = "2"
 esplora-client = { version = "0.11.0", default-features = false, features = ["async", "async-https", "tokio"] }
 anyhow = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Vendor OpenSSL for Android cross-compilation (ark-bdk-wallet pulls in native-tls via esplora-client)
 openssl = { version = "0.10", features = ["vendored"], optional = true }
