@@ -9,6 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import ReceiveSheet from '../ReceiveSheet';
+import SendSheet from '../SendSheet';
 
 type ConnectionState =
   | 'checking'
@@ -89,6 +90,7 @@ export function DashboardRoute() {
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [receiveOpen, setReceiveOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
   const [swaps, setSwaps] = useState<SwapRecord[]>([]);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [settling, setSettling] = useState(false);
@@ -364,6 +366,23 @@ export function DashboardRoute() {
 
       <div className="flex justify-center gap-3 px-6 pb-6">
         <button
+          onClick={() => setSendOpen(true)}
+          className="flex items-center gap-2 rounded-2xl bg-white/10 px-6 py-2.5 text-sm font-bold text-white hover:bg-white/15 active:scale-95 transition-all"
+        >
+          <svg
+            className="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+          Send
+        </button>
+        <button
           onClick={() => setReceiveOpen(true)}
           className="flex items-center gap-2 rounded-2xl bg-lime-300 px-6 py-2.5 text-sm font-bold text-gray-900 active:scale-95 transition-transform"
         >
@@ -567,6 +586,12 @@ export function DashboardRoute() {
         )}
       </div>
       <ReceiveSheet open={receiveOpen} onOpenChange={setReceiveOpen} />
+      <SendSheet
+        open={sendOpen}
+        onOpenChange={setSendOpen}
+        offchainBalanceSat={balance?.offchain_total_sat ?? 0}
+        onSuccess={() => void fetchData()}
+      />
     </main>
   );
 }

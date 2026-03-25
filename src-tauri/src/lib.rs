@@ -241,6 +241,12 @@ pub fn run() {
             // Receive subscription
             commands::receive::start_receive_subscription,
             commands::receive::stop_receive_subscription,
+            // Send
+            commands::send::detect_address_type,
+            commands::send::send_lightning,
+            commands::send::send_ark,
+            commands::send::send_onchain,
+            commands::send::estimate_onchain_send_fee,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
