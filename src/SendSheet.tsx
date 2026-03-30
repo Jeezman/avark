@@ -336,7 +336,7 @@ function SendSheetContent({
       <div className="flex flex-col gap-4">
         {/* Address input */}
         <div>
-          <label className="block text-xs text-white/40 mb-1.5">
+          <label className="block text-xs theme-text-muted mb-1.5">
             Recipient address
           </label>
           <div className="flex gap-2">
@@ -345,11 +345,11 @@ function SendSheetContent({
               placeholder="Ark, Bitcoin, or BOLT11 invoice"
               value={address}
               onChange={(e) => handleAddressChange(e, amountInput)}
-              className="flex-1 min-w-0 rounded-xl bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-white/20 font-mono"
+              className="flex-1 min-w-0 rounded-xl theme-card px-4 py-3 text-sm theme-text outline-none placeholder:opacity-20 font-mono"
             />
             <button
               onClick={() => setScanning(true)}
-              className="shrink-0 rounded-xl bg-white/5 px-3 py-3 text-white/50 hover:bg-white/10 hover:text-white/70 transition-colors"
+              className="shrink-0 rounded-xl theme-card px-3 py-3 theme-text-muted hover:opacity-80 transition-colors"
               title="Scan QR code"
             >
               <svg
@@ -370,15 +370,15 @@ function SendSheetContent({
             </button>
           </div>
           {detectingAddress && (
-            <p className="text-[10px] text-white/30 mt-1">
+            <p className="text-[10px] theme-text-faint mt-1">
               Detecting address type...
             </p>
           )}
           {addressError && (
-            <p className="text-[10px] text-red-300/70 mt-1">{addressError}</p>
+            <p className="text-[10px] theme-danger mt-1">{addressError}</p>
           )}
           {addressType && !addressError && (
-            <p className="text-[10px] text-lime-300/70 mt-1">
+            <p className="text-[10px] theme-accent mt-1">
               {addressType === 'ark'
                 ? 'Ark payment — instant'
                 : addressType === 'bitcoin'
@@ -392,8 +392,8 @@ function SendSheetContent({
 
         {/* Amount input */}
         <div>
-          <label className="block text-xs text-white/40 mb-1.5">Amount</label>
-          <div className="flex items-center gap-2 rounded-xl bg-white/5 px-4 py-3">
+          <label className="block text-xs theme-text-muted mb-1.5">Amount</label>
+          <div className="flex items-center gap-2 rounded-xl theme-card px-4 py-3">
             <input
               type="text"
               inputMode="numeric"
@@ -401,21 +401,21 @@ function SendSheetContent({
               value={amountInput}
               onChange={(e) => handleAmountChange(e, addressType, address)}
               disabled={addressType === 'lightning' && lightningKind === 'bolt11'}
-              className="flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-white/20 tabular-nums"
+              className="flex-1 bg-transparent text-sm font-medium theme-text outline-none placeholder:opacity-20 tabular-nums"
             />
-            <span className="text-xs text-white/40">sats</span>
+            <span className="text-xs theme-text-muted">sats</span>
           </div>
           <div className="flex justify-between mt-1">
-            <p className="text-[10px] text-white/30">
+            <p className="text-[10px] theme-text-faint">
               Available: {offchainBalanceSat.toLocaleString()} sats
             </p>
             {amountSats !== null && amountSats > offchainBalanceSat && (
-              <p className="text-[10px] text-red-300/70">Insufficient funds</p>
+              <p className="text-[10px] theme-danger">Insufficient funds</p>
             )}
           </div>
           <button
             onClick={() => setAmountInput(String(offchainBalanceSat))}
-            className="text-[10px] text-lime-300/60 hover:text-lime-300 mt-0.5 transition-colors"
+            className="text-[10px] theme-accent hover:opacity-80 mt-0.5 transition-colors"
           >
             Send max
           </button>
@@ -425,20 +425,20 @@ function SendSheetContent({
         {addressType === 'bitcoin' &&
           amountSats !== null &&
           amountSats > 0 && (
-            <div className="rounded-xl bg-white/5 px-4 py-2.5">
-              <p className="text-[10px] text-white/40 mb-0.5">
+            <div className="rounded-xl theme-card px-4 py-2.5">
+              <p className="text-[10px] theme-text-muted mb-0.5">
                 Estimated fee
               </p>
               {feeLoading && (
-                <p className="text-xs text-white/30">Calculating...</p>
+                <p className="text-xs theme-text-faint">Calculating...</p>
               )}
               {fee && (
-                <p className="text-xs text-white/70">
+                <p className="text-xs theme-text-secondary">
                   {fee.fee_sat.toLocaleString()} sats
                 </p>
               )}
               {feeError && (
-                <p className="text-xs text-yellow-300/70">{feeError}</p>
+                <p className="text-xs theme-warning">{feeError}</p>
               )}
             </div>
           )}
@@ -458,16 +458,16 @@ function SendSheetContent({
   if (step === 'confirm') {
     return (
       <div className="flex flex-col gap-4">
-        <div className="rounded-xl bg-white/5 px-4 py-3 space-y-2">
+        <div className="rounded-xl theme-card px-4 py-3 space-y-2">
           <div className="flex justify-between">
-            <span className="text-xs text-white/40">To</span>
-            <span className="text-xs text-white/70 font-mono max-w-[200px] truncate">
+            <span className="text-xs theme-text-muted">To</span>
+            <span className="text-xs theme-text-secondary font-mono max-w-[200px] truncate">
               {address.trim()}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-xs text-white/40">Type</span>
-            <span className="text-xs text-white/70">
+            <span className="text-xs theme-text-muted">Type</span>
+            <span className="text-xs theme-text-secondary">
               {addressType === 'ark'
                 ? 'Ark (instant)'
                 : addressType === 'bitcoin'
@@ -476,22 +476,22 @@ function SendSheetContent({
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-xs text-white/40">Amount</span>
-            <span className="text-xs text-white font-medium">
+            <span className="text-xs theme-text-muted">Amount</span>
+            <span className="text-xs theme-text font-medium">
               {amountSats?.toLocaleString()} sats
             </span>
           </div>
           {fee && addressType === 'bitcoin' && (
             <>
               <div className="flex justify-between">
-                <span className="text-xs text-white/40">Fee</span>
-                <span className="text-xs text-white/70">
+                <span className="text-xs theme-text-muted">Fee</span>
+                <span className="text-xs theme-text-secondary">
                   {fee.fee_sat.toLocaleString()} sats
                 </span>
               </div>
-              <div className="border-t border-white/10 pt-2 flex justify-between">
-                <span className="text-xs text-white/40">Total</span>
-                <span className="text-xs text-white font-medium">
+              <div className="border-t theme-border pt-2 flex justify-between">
+                <span className="text-xs theme-text-muted">Total</span>
+                <span className="text-xs theme-text font-medium">
                   {((amountSats ?? 0) + fee.fee_sat).toLocaleString()} sats
                 </span>
               </div>
@@ -502,7 +502,7 @@ function SendSheetContent({
         <div className="flex gap-3">
           <button
             onClick={handleBack}
-            className="flex-1 rounded-xl bg-white/10 py-3 text-sm font-bold text-white hover:bg-white/15 transition-colors"
+            className="flex-1 rounded-xl theme-card-elevated py-3 text-sm font-bold theme-text hover:opacity-80 transition-colors"
           >
             Back
           </button>
@@ -540,7 +540,7 @@ function SendSheetContent({
             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
           />
         </svg>
-        <p className="text-sm text-white/60">
+        <p className="text-sm theme-text-secondary">
           {addressType === 'ark'
             ? 'Sending...'
             : addressType === 'bitcoin'
@@ -568,8 +568,8 @@ function SendSheetContent({
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <p className="text-lg font-bold text-white mb-1">Sent!</p>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-lg font-bold theme-text mb-1">Sent!</p>
+        <p className="text-sm theme-text-muted mb-4">
           {amountSats?.toLocaleString()} sats{' '}
           {addressType === 'ark'
             ? 'via Ark'
@@ -587,13 +587,13 @@ function SendSheetContent({
                 toast.error('Failed to copy');
               }
             }}
-            className="flex items-center gap-2 rounded-xl bg-white/5 px-4 py-2.5 hover:bg-white/10 transition-colors mb-4"
+            className="flex items-center gap-2 rounded-xl theme-card px-4 py-2.5 transition-colors mb-4"
           >
-            <span className="font-mono text-xs text-white/70 max-w-[200px] truncate">
+            <span className="font-mono text-xs theme-text-secondary max-w-[200px] truncate">
               {txid}
             </span>
             <svg
-              className="h-3.5 w-3.5 shrink-0 text-white/30"
+              className="h-3.5 w-3.5 shrink-0 theme-text-faint"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -619,9 +619,9 @@ function SendSheetContent({
   // ── Error step ───────────────────────────────────────────────
   return (
     <div className="flex flex-col items-center py-6">
-      <div className="mb-4 rounded-full bg-red-500/10 p-4">
+      <div className="mb-4 rounded-full theme-danger-bg p-4">
         <svg
-          className="h-8 w-8 text-red-400"
+          className="h-8 w-8 theme-danger"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -634,14 +634,14 @@ function SendSheetContent({
           <line x1="9" y1="9" x2="15" y2="15" />
         </svg>
       </div>
-      <p className="text-lg font-bold text-white mb-1">Failed</p>
-      <p className="text-sm text-red-300/70 mb-4 text-center px-4">
+      <p className="text-lg font-bold theme-text mb-1">Failed</p>
+      <p className="text-sm theme-danger mb-4 text-center px-4">
         {sendError}
       </p>
       <div className="flex gap-3 w-full">
         <button
           onClick={handleBack}
-          className="flex-1 rounded-xl bg-white/10 py-3 text-sm font-bold text-white hover:bg-white/15 transition-colors"
+          className="flex-1 rounded-xl theme-card-elevated py-3 text-sm font-bold theme-text hover:opacity-80 transition-colors"
         >
           Edit
         </button>
@@ -667,17 +667,17 @@ function SendSheet({
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-40 bg-black/60" />
         <Drawer.Content
-          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[90vh] flex-col rounded-t-3xl bg-gray-800 px-6 pt-6 pb-8 outline-none"
+          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[90vh] flex-col rounded-t-3xl theme-drawer px-6 pt-6 pb-8 outline-none"
           style={{
             paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 32px)',
           }}
         >
-          <Drawer.Handle className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
+          <Drawer.Handle className="mx-auto mb-4 h-1 w-10 rounded-full theme-drawer-handle" />
 
-          <Drawer.Title className="text-lg font-bold text-white text-center mb-1">
+          <Drawer.Title className="text-lg font-bold theme-text text-center mb-1">
             Send
           </Drawer.Title>
-          <Drawer.Description className="text-xs text-white/50 text-center mb-5">
+          <Drawer.Description className="text-xs theme-text-muted text-center mb-5">
             Send bitcoin to an Ark address, Bitcoin address, or Lightning invoice
           </Drawer.Description>
 

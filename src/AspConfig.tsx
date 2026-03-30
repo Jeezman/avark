@@ -17,7 +17,7 @@ type Status =
 
 function AspIcon() {
   return (
-    <div className="w-16 h-16 mb-6 rounded-2xl bg-white/10 flex items-center justify-center">
+    <div className="w-16 h-16 mb-6 rounded-2xl theme-card-elevated flex items-center justify-center">
       <svg viewBox="0 0 24 24" className="w-8 h-8 text-lime-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 2L2 7l10 5 10-5-10-5z" />
         <path d="M2 17l10 5 10-5" />
@@ -70,12 +70,12 @@ function AspConfig({ onConnected }: { onConnected: () => void | Promise<void> })
   const success = status.type === "success";
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-gradient-to-br from-gray-900 to-gray-800 text-white">
+    <div className="fixed inset-0 flex flex-col theme-bg theme-text">
       <div className="flex-1 flex flex-col items-center justify-center px-8">
         <AspIcon />
 
         <h1 className="text-2xl font-bold mb-2">Connect to ASP</h1>
-        <p className="text-white/60 text-center mb-8 max-w-xs">
+        <p className="theme-text-secondary text-center mb-8 max-w-xs">
           Enter the URL of your Ark Service Provider to get started.
         </p>
 
@@ -89,17 +89,17 @@ function AspConfig({ onConnected }: { onConnected: () => void | Promise<void> })
             }}
             placeholder="https://arkade.computer/"
             disabled={connecting}
-            className="w-full px-4 py-3 rounded-xl bg-white/10 text-white placeholder-white/30 border border-white/20 focus:border-lime-300 focus:outline-none transition-colors disabled:opacity-50"
+            className="w-full px-4 py-3 rounded-xl theme-card-elevated theme-text placeholder:opacity-20 border border-white/20 focus:border-lime-300 focus:outline-none transition-colors disabled:opacity-50"
           />
 
           {status.type === "error" && (
-            <p className="mt-2 text-sm text-red-400" role="alert" aria-live="polite">{status.message}</p>
+            <p className="mt-2 text-sm theme-danger" role="alert" aria-live="polite">{status.message}</p>
           )}
 
           {success && (
             <div className="mt-3 p-3 rounded-xl bg-lime-300/10 border border-lime-300/30">
               <p className="text-sm text-lime-300 font-medium">Connected</p>
-              <p className="text-xs text-white/50 mt-1">
+              <p className="text-xs theme-text-muted mt-1">
                 Network: {status.info.network} &middot; Version: {status.info.version}
               </p>
             </div>

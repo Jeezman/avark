@@ -377,7 +377,12 @@ pub type ArkClient = ark_client::Client<
     ark_client::Bip32KeyProvider,
 >;
 
-pub fn esplora_url(network: bitcoin::Network) -> &'static str {
+pub fn esplora_url(network: bitcoin::Network, custom: Option<&str>) -> String {
+    if let Some(url) = custom {
+        if !url.is_empty() {
+            return url.to_string();
+        }
+    }
     match network {
         bitcoin::Network::Bitcoin => "https://blockstream.info/api",
         bitcoin::Network::Testnet => "https://blockstream.info/testnet/api",
@@ -385,6 +390,7 @@ pub fn esplora_url(network: bitcoin::Network) -> &'static str {
         bitcoin::Network::Regtest => "http://localhost:7070",
         _ => "https://blockstream.info/api",
     }
+    .to_string()
 }
 
 #[cfg(test)]
