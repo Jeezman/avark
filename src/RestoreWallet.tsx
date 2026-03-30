@@ -63,30 +63,30 @@ function RestoreWallet({ onRestore, restoring }: RestoreWalletProps) {
   }, [allFilled, restoring, words, onRestore]);
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-gradient-to-br from-gray-900 to-gray-800 text-white">
+    <div className="fixed inset-0 flex flex-col theme-bg theme-text">
       <div className="flex-1 flex flex-col items-center px-6 overflow-y-auto" style={{ paddingTop: "calc(env(safe-area-inset-top, 16px) + 16px)" }}>
-        <div className="w-16 h-16 mb-4 rounded-2xl bg-white/10 flex items-center justify-center">
+        <div className="w-16 h-16 mb-4 rounded-2xl theme-card-elevated flex items-center justify-center">
           <svg viewBox="0 0 24 24" className="w-8 h-8 text-lime-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
           </svg>
         </div>
 
         <h1 className="text-2xl font-bold mb-2">Restore Your Wallet</h1>
-        <p className="text-white/60 text-center mb-4 max-w-xs text-sm">
+        <p className="theme-text-secondary text-center mb-4 max-w-xs text-sm">
           Enter your {wordCount}-word seed phrase to recover your wallet.
         </p>
 
         <button
           onClick={handleWordCountToggle}
-          className="mb-4 px-4 py-1.5 rounded-full bg-white/10 text-white/70 text-xs font-medium hover:bg-white/15 transition-colors"
+          className="mb-4 px-4 py-1.5 rounded-full theme-card-elevated theme-text-secondary text-xs font-medium hover:opacity-80 transition-colors"
         >
           Switch to {wordCount === 12 ? 24 : 12} words
         </button>
 
         <div className={`w-full max-w-sm grid grid-cols-3 gap-2 mb-6 ${wordCount === 24 ? "grid-rows-8" : "grid-rows-4"}`}>
           {words.map((word, i) => (
-            <div key={i} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-white/10">
-              <span className="text-white/40 font-mono text-xs w-5 text-right shrink-0">
+            <div key={i} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg theme-card-elevated">
+              <span className="theme-text-muted font-mono text-xs w-5 text-right shrink-0">
                 {i + 1}
               </span>
               <input
@@ -97,7 +97,7 @@ function RestoreWallet({ onRestore, restoring }: RestoreWalletProps) {
                 spellCheck={false}
                 value={word}
                 onChange={(e) => handleWordChange(i, e.target.value)}
-                className="w-full bg-transparent text-sm font-medium outline-none placeholder:text-white/20"
+                className="w-full bg-transparent text-sm font-medium outline-none placeholder:opacity-20"
                 placeholder="..."
                 disabled={restoring}
               />
@@ -107,7 +107,7 @@ function RestoreWallet({ onRestore, restoring }: RestoreWalletProps) {
       </div>
 
       <div className="px-6 pb-2" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 12px) + 16px)" }}>
-        <p className="text-white/40 text-xs text-center mb-3">
+        <p className="theme-text-muted text-xs text-center mb-3">
           {filledCount} of {wordCount} words entered
         </p>
         <button

@@ -43,6 +43,21 @@ fn derive_wallet_xpriv(
         .map_err(|e| AppError::Wallet(e.to_string()))
 }
 
+/// Convert a raw sync error into a short, user-facing message.
+/// The full error is already logged via `warn!`.
+fn friendly_sync_error(raw: &str) -> String {
+    let lower = raw.to_lowercase();
+    if lower.contains("429") || lower.contains("too many requests") || lower.contains("rate") {
+        "Onchain sync paused — rate limited by block explorer. Will retry automatically.".into()
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        "Onchain sync failed — request timed out. Will retry automatically.".into()
+    } else if lower.contains("connection") || lower.contains("dns") || lower.contains("resolve") {
+        "Onchain sync failed — network error. Check your connection.".into()
+    } else {
+        "Onchain sync failed — will retry automatically.".into()
+    }
+}
+
 /// Spawn a background task that periodically syncs the onchain wallet.
 ///
 /// Returns a `watch::Sender` whose drop signals the task to stop.
@@ -58,10 +73,12 @@ async fn spawn_onchain_sync(
 
     /// Minimum interval between UI error notifications for consecutive sync failures.
     const ERROR_NOTIFY_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+    /// Maximum backoff interval after repeated sync failures.
+    const MAX_SYNC_BACKOFF: Duration = Duration::from_secs(600);
 
     if let Err(e) = wallet.sync().await {
         warn!("initial onchain sync failed: {e}");
-        let _ = app.emit("wallet-sync-error", format!("Onchain sync failed: {e}"));
+        let _ = app.emit("wallet-sync-error", friendly_sync_error(&e.to_string()));
     }
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(());
@@ -69,10 +86,20 @@ async fn spawn_onchain_sync(
     let bg_app = app.clone();
     tokio::spawn(async move {
         let mut last_error_notify: Option<tokio::time::Instant> = None;
+        let mut consecutive_failures: u32 = 0;
 
         loop {
+            let delay = if consecutive_failures == 0 {
+                ONCHAIN_SYNC_INTERVAL
+            } else {
+                let backoff_secs = ONCHAIN_SYNC_INTERVAL
+                    .as_secs()
+                    .saturating_mul(1u64 << consecutive_failures.min(10));
+                Duration::from_secs(backoff_secs).min(MAX_SYNC_BACKOFF)
+            };
+
             tokio::select! {
-                _ = tokio::time::sleep(ONCHAIN_SYNC_INTERVAL) => {}
+                _ = tokio::time::sleep(delay) => {}
                 _ = cancel_rx.changed() => {
                     debug!("onchain sync task cancelled");
                     break;
@@ -81,11 +108,16 @@ async fn spawn_onchain_sync(
 
             match bg_wallet.sync().await {
                 Ok(()) => {
-                    // Reset throttle on success so the next failure notifies immediately.
+                    consecutive_failures = 0;
                     last_error_notify = None;
                 }
                 Err(e) => {
-                    warn!("background onchain sync failed: {e}");
+                    consecutive_failures = consecutive_failures.saturating_add(1);
+                    warn!(
+                        consecutive_failures,
+                        next_retry_secs = delay.as_secs(),
+                        "background onchain sync failed: {e}"
+                    );
 
                     let should_notify = last_error_notify
                         .map(|t| t.elapsed() >= ERROR_NOTIFY_COOLDOWN)
@@ -93,7 +125,7 @@ async fn spawn_onchain_sync(
 
                     if should_notify {
                         let _ =
-                            bg_app.emit("wallet-sync-error", format!("Onchain sync failed: {e}"));
+                            bg_app.emit("wallet-sync-error", friendly_sync_error(&e.to_string()));
                         last_error_notify = Some(tokio::time::Instant::now());
                     }
                 }
@@ -108,6 +140,7 @@ async fn build_ark_client(
     app: &tauri::AppHandle,
     xpriv: bitcoin::bip32::Xpriv,
     asp_url: &str,
+    custom_esplora: Option<&str>,
 ) -> Result<
     (
         ark::ArkClient,
@@ -132,7 +165,7 @@ async fn build_ark_client(
     let network = server_info.network;
 
     let secp = bitcoin::key::Secp256k1::new();
-    let esplora = ark::esplora_url(network);
+    let esplora = ark::esplora_url(network, custom_esplora);
 
     let db_path = boarding_db_path(app)?;
     let store = secure_storage::SecureStorage::get_instance(app).clone();
@@ -141,10 +174,10 @@ async fn build_ark_client(
             .await
             .map_err(|e| AppError::Wallet(format!("Boarding DB task panicked: {e}")))?
             .map_err(|e| AppError::Wallet(format!("Failed to load boarding DB: {e}")))?;
-    let bdk_wallet = ark_bdk_wallet::Wallet::new_from_xpriv(xpriv, secp, network, esplora, db)
+    let bdk_wallet = ark_bdk_wallet::Wallet::new_from_xpriv(xpriv, secp, network, &esplora, db)
         .map_err(|e| AppError::Wallet(format!("Failed to create BDK wallet: {e}")))?;
 
-    let blockchain = ark::EsploraBlockchain::new(esplora)
+    let blockchain = ark::EsploraBlockchain::new(&esplora)
         .map_err(|e| AppError::Wallet(format!("Failed to create blockchain client: {e}")))?;
 
     let swap_db = swap_db_path(app)?;
@@ -200,7 +233,7 @@ async fn finalize_wallet_setup(
     app: &tauri::AppHandle,
     secret: &wallet::SecretMnemonic,
 ) -> Result<(), AppError> {
-    let (asp_url, network) = {
+    let (asp_url, network, custom_esplora) = {
         let state = app.state::<SettingsLock>();
         let _lock = state.0.read().await;
         let settings = read_settings(app).await?;
@@ -213,14 +246,14 @@ async fn finalize_wallet_setup(
         let network = net_str
             .parse::<bitcoin::Network>()
             .map_err(|e| AppError::Wallet(format!("Invalid network \"{net_str}\": {e}")))?;
-        (url, network)
+        (url, network, settings.esplora_url)
     };
 
     let xpriv = wallet::derive_master_xpriv_from_secret(secret, network)
         .map_err(|e| AppError::Wallet(e.to_string()))?;
 
     let (client, wallet_arc, swap_storage, key_provider) =
-        build_ark_client(app, xpriv, &asp_url).await?;
+        build_ark_client(app, xpriv, &asp_url, custom_esplora.as_deref()).await?;
 
     let wallet_data = WalletData {
         asp_url,
@@ -360,9 +393,14 @@ pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
 
     let wallet_data = read_wallet_data(&app).await?;
     let xpriv = derive_wallet_xpriv(&app, &wallet_data)?;
+    let custom_esplora = {
+        let state = app.state::<SettingsLock>();
+        let _lock = state.0.read().await;
+        read_settings(&app).await.ok().and_then(|s| s.esplora_url)
+    };
 
     let (client, wallet_arc, swap_storage, key_provider) =
-        build_ark_client(&app, xpriv, &wallet_data.asp_url).await?;
+        build_ark_client(&app, xpriv, &wallet_data.asp_url, custom_esplora.as_deref()).await?;
 
     let sync_cancel = spawn_onchain_sync(Arc::clone(&wallet_arc), &app).await;
     let client_arc = Arc::new(client);
@@ -422,6 +460,7 @@ pub async fn delete_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
     settings.onboarding_seen = false;
     settings.asp_url = None;
     settings.network = None;
+    settings.esplora_url = None;
     let _ = write_settings(&app, &settings).await;
 
     info!("wallet data deleted");
@@ -617,7 +656,12 @@ pub async fn settle(app: tauri::AppHandle) -> Result<SettleResult, AppError> {
         .network
         .parse::<bitcoin::Network>()
         .map_err(|e| AppError::Wallet(format!("Invalid network: {e}")))?;
-    let esplora_base = ark::esplora_url(network);
+    let custom_esplora = {
+        let state = app.state::<SettingsLock>();
+        let _lock = state.0.read().await;
+        read_settings(&app).await.ok().and_then(|s| s.esplora_url)
+    };
+    let esplora_base = ark::esplora_url(network, custom_esplora.as_deref());
 
     let script_pubkey = boarding_address.script_pubkey();
 

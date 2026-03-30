@@ -101,9 +101,9 @@ export function BootRoute() {
 
   if (stage === "wallet-error") {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 p-8 text-white">
-        <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-full bg-red-500/20">
-          <svg className="h-6 w-6 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+      <div className="fixed inset-0 flex flex-col items-center justify-center theme-bg p-8 theme-text">
+        <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-full theme-danger-bg">
+          <svg className="h-6 w-6 theme-danger" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
@@ -112,7 +112,7 @@ export function BootRoute() {
           </svg>
         </div>
         <h1 className="mb-2 text-xl font-bold">Unable to Load Wallet</h1>
-        <p className="mb-6 max-w-sm text-center text-sm text-white/60">{walletError}</p>
+        <p className="mb-6 max-w-sm text-center text-sm theme-text-secondary">{walletError}</p>
         <div className="flex gap-3">
           <button
             onClick={handleRetryLoad}
@@ -124,7 +124,7 @@ export function BootRoute() {
           <button
             onClick={handleStartOver}
             disabled={resetting}
-            className="rounded-lg border border-white/20 px-6 py-2.5 font-semibold text-white transition-colors hover:bg-white/10 disabled:opacity-50"
+            className="rounded-lg border border-white/20 px-6 py-2.5 font-semibold theme-text transition-colors theme-card disabled:opacity-50"
           >
             {resetting ? "Resetting..." : "Start Over"}
           </button>
@@ -134,12 +134,12 @@ export function BootRoute() {
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 text-white">
+    <div className="fixed inset-0 flex flex-col items-center justify-center theme-bg theme-text">
       <svg className="mb-6 h-10 w-10 animate-spin text-lime-300" viewBox="0 0 24 24" fill="none">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
       </svg>
-      <p className="text-sm text-white/60">
+      <p className="text-sm theme-text-secondary">
         Unlocking wallet...
       </p>
     </div>

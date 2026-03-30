@@ -73,11 +73,11 @@ function QrScannerView({ onScan, onClose }: QrScannerViewProps) {
   return (
     <div className="flex flex-col items-center gap-4">
       {error ? (
-        <div className="rounded-2xl bg-red-500/10 p-6 text-center">
-          <p className="text-sm text-red-300 mb-3">{error}</p>
+        <div className="rounded-2xl theme-danger-bg p-6 text-center">
+          <p className="text-sm theme-danger mb-3">{error}</p>
           <button
             onClick={onClose}
-            className="rounded-xl bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/15 transition-colors"
+            className="rounded-xl theme-card-elevated px-4 py-2 text-sm font-medium theme-text hover:opacity-80 transition-colors"
           >
             Close
           </button>
@@ -92,12 +92,12 @@ function QrScannerView({ onScan, onClose }: QrScannerViewProps) {
               muted
             />
           </div>
-          <p className="text-xs text-white/40">
+          <p className="text-xs theme-text-muted">
             Point camera at a QR code
           </p>
           <button
             onClick={onClose}
-            className="rounded-xl bg-white/10 px-6 py-2.5 text-sm font-medium text-white hover:bg-white/15 transition-colors"
+            className="rounded-xl theme-card-elevated px-6 py-2.5 text-sm font-medium theme-text hover:opacity-80 transition-colors"
           >
             Cancel
           </button>

@@ -11,6 +11,13 @@ use tauri::Manager;
 use tokio::sync::RwLock;
 use tracing::info;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Theme {
+    Dark,
+    Light,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct Settings {
     #[serde(default)]
@@ -19,6 +26,10 @@ pub(crate) struct Settings {
     pub(crate) asp_url: Option<String>,
     #[serde(default)]
     pub(crate) network: Option<String>,
+    #[serde(default)]
+    pub(crate) theme: Option<Theme>,
+    #[serde(default)]
+    pub(crate) esplora_url: Option<String>,
 }
 
 pub(crate) struct AppWalletState {
@@ -122,7 +133,11 @@ pub(crate) async fn write_settings(
         tokio::fs::create_dir_all(dir).await?;
     }
     let data = serde_json::to_string_pretty(settings)?;
-    tokio::fs::write(&path, data).await?;
+    // Atomic write: write to a temp file then rename, so a crash mid-write
+    // never leaves a corrupted settings.json.
+    let tmp = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp, data).await?;
+    tokio::fs::rename(&tmp, &path).await?;
     Ok(())
 }
 
@@ -220,6 +235,10 @@ pub fn run() {
             has_seen_onboarding,
             set_onboarding_seen,
             connect_asp,
+            // Settings
+            commands::settings::settings,
+            commands::settings::set_theme,
+            commands::settings::set_esplora_url,
             // Wallet lifecycle
             commands::wallet::has_wallet,
             commands::wallet::create_wallet,

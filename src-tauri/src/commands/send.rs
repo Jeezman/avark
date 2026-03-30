@@ -353,7 +353,10 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(result.address_type, AddressType::Lightning));
-        assert!(matches!(result.lightning_kind, Some(LightningKind::Address)));
+        assert!(matches!(
+            result.lightning_kind,
+            Some(LightningKind::Address)
+        ));
     }
 
     #[tokio::test]

@@ -64,16 +64,16 @@ function CopyRow({
   return (
     <button
       onClick={handleCopy}
-      className="flex w-full items-center justify-between gap-3 rounded-xl bg-white/5 px-4 py-2.5 hover:bg-white/10 transition-colors text-left"
+      className="flex w-full items-center justify-between gap-3 rounded-xl theme-card px-4 py-2.5 transition-colors text-left"
     >
       <div className="min-w-0">
-        <p className="text-[10px] text-white/40 mb-0.5">{label}</p>
-        <p className="font-mono text-xs text-white/70 truncate">
+        <p className="text-[10px] theme-text-muted mb-0.5">{label}</p>
+        <p className="font-mono text-xs theme-text-secondary truncate">
           {truncated ?? truncateMiddle(value)}
         </p>
       </div>
       <svg
-        className="h-4 w-4 shrink-0 text-white/30"
+        className="h-4 w-4 shrink-0 theme-text-faint"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -233,30 +233,30 @@ function ReceiveSheetContent() {
       )}
 
       {error && (
-        <div className="rounded-2xl bg-red-500/10 p-6 text-center">
-          <p className="text-sm text-red-300">{error}</p>
+        <div className="rounded-2xl theme-danger-bg p-6 text-center">
+          <p className="text-sm theme-danger">{error}</p>
         </div>
       )}
 
       {addresses && qrValue && (
         <div className="flex flex-col items-center">
           <div className="w-full mb-4">
-            <label className="block text-xs text-white/40 mb-1.5">
+            <label className="block text-xs theme-text-muted mb-1.5">
               Amount (optional)
             </label>
-            <div className="flex items-center gap-2 rounded-xl bg-white/5 px-4 py-2.5">
+            <div className="flex items-center gap-2 rounded-xl theme-card px-4 py-2.5">
               <input
                 type="text"
                 inputMode="numeric"
                 placeholder="0"
                 value={amountInput}
                 onChange={handleAmountChange}
-                className="flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-white/20 tabular-nums"
+                className="flex-1 bg-transparent text-sm font-medium theme-text outline-none placeholder:opacity-20 tabular-nums"
               />
-              <span className="text-xs text-white/40">sats</span>
+              <span className="text-xs theme-text-muted">sats</span>
             </div>
             {amountSats !== null && amountSats > 0 && (
-              <p className="text-[10px] text-white/30 mt-1 text-right">
+              <p className="text-[10px] theme-text-faint mt-1 text-right">
                 {amountSats.toLocaleString()} sats = {satsToBtc(amountSats)} BTC
               </p>
             )}
@@ -275,15 +275,15 @@ function ReceiveSheetContent() {
             <CopyRow label="BTC address" value={addresses.boarding_address} />
             <CopyRow label="Ark address" value={addresses.ark_address} />
             {ln.loading && (
-              <div className="flex items-center gap-3 rounded-xl bg-white/5 px-4 py-2.5">
+              <div className="flex items-center gap-3 rounded-xl theme-card px-4 py-2.5">
                 <div className="min-w-0">
-                  <p className="text-[10px] text-white/40 mb-0.5">
+                  <p className="text-[10px] theme-text-muted mb-0.5">
                     Lightning invoice
                   </p>
-                  <p className="text-xs text-white/30">Generating...</p>
+                  <p className="text-xs theme-text-faint">Generating...</p>
                 </div>
                 <svg
-                  className="h-4 w-4 shrink-0 animate-spin text-white/30"
+                  className="h-4 w-4 shrink-0 animate-spin theme-text-faint"
                   viewBox="0 0 24 24"
                   fill="none"
                 >
@@ -304,11 +304,11 @@ function ReceiveSheetContent() {
               </div>
             )}
             {ln.error && (
-              <div className="rounded-xl bg-white/5 px-4 py-2.5">
-                <p className="text-[10px] text-white/40 mb-0.5">
+              <div className="rounded-xl theme-card px-4 py-2.5">
+                <p className="text-[10px] theme-text-muted mb-0.5">
                   Lightning invoice
                 </p>
-                <p className="text-xs text-red-300/70">{ln.error}</p>
+                <p className="text-xs theme-danger/70">{ln.error}</p>
               </div>
             )}
             {lnInvoiceForQr && (
@@ -320,7 +320,7 @@ function ReceiveSheetContent() {
               amountSats > 0 && (
                 <button
                   onClick={() => ln.generate(amountSats)}
-                  className="w-full rounded-xl bg-yellow-300/10 px-4 py-2.5 text-xs font-medium text-yellow-300 hover:bg-yellow-300/20 transition-colors"
+                  className="w-full rounded-xl theme-warning-bg px-4 py-2.5 text-xs font-medium theme-warning hover:opacity-80 transition-colors"
                 >
                   Generate Lightning invoice
                 </button>
@@ -338,17 +338,17 @@ function ReceiveSheet({ open, onOpenChange }: ReceiveSheetProps) {
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-40 bg-black/60" />
         <Drawer.Content
-          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[90vh] flex-col rounded-t-3xl bg-gray-800 px-6 pt-6 pb-8 outline-none"
+          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[90vh] flex-col rounded-t-3xl theme-drawer px-6 pt-6 pb-8 outline-none"
           style={{
             paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 32px)',
           }}
         >
-          <Drawer.Handle className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
+          <Drawer.Handle className="mx-auto mb-4 h-1 w-10 rounded-full theme-drawer-handle" />
 
-          <Drawer.Title className="text-lg font-bold text-white text-center mb-1">
+          <Drawer.Title className="text-lg font-bold theme-text text-center mb-1">
             Receive
           </Drawer.Title>
-          <Drawer.Description className="text-xs text-white/50 text-center mb-5">
+          <Drawer.Description className="text-xs theme-text-muted text-center mb-5">
             Share an address to receive bitcoin
           </Drawer.Description>
 
