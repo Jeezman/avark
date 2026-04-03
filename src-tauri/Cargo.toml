@@ -58,4 +58,5 @@ vendored-openssl = ["dep:openssl"]
 codegen-units = 1
 lto = true
 strip = true
-
+opt-level = "z"       
+panic = "abort"       

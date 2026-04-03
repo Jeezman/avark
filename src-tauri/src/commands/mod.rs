@@ -1,3 +1,4 @@
+pub mod coins;
 pub mod lightning;
 pub mod receive;
 pub mod send;

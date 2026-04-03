@@ -632,9 +632,20 @@ mod tests {
 
     #[test]
     fn esplora_url_matches_network() {
-        assert!(esplora_url(bitcoin::Network::Bitcoin).contains("blockstream.info/api"));
-        assert!(esplora_url(bitcoin::Network::Testnet).contains("testnet"));
-        assert!(esplora_url(bitcoin::Network::Signet).contains("mutinynet"));
-        assert!(esplora_url(bitcoin::Network::Regtest).starts_with("http://localhost"));
+        assert!(esplora_url(bitcoin::Network::Bitcoin, None).contains("blockstream.info/api"));
+        assert!(esplora_url(bitcoin::Network::Testnet, None).contains("testnet"));
+        assert!(esplora_url(bitcoin::Network::Signet, None).contains("mutinynet"));
+        assert!(esplora_url(bitcoin::Network::Regtest, None).starts_with("http://localhost"));
+    }
+
+    #[test]
+    fn esplora_url_custom_overrides_default() {
+        let custom = "https://my-esplora.example.com/api";
+        assert_eq!(esplora_url(bitcoin::Network::Bitcoin, Some(custom)), custom);
+    }
+
+    #[test]
+    fn esplora_url_empty_custom_uses_default() {
+        assert!(esplora_url(bitcoin::Network::Bitcoin, Some("")).contains("blockstream.info"));
     }
 }

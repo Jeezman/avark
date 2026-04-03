@@ -76,9 +76,8 @@ function SendSheetContent({
       })
       .catch((err) => {
         if (!controller.signal.aborted) {
-          setFeeError(
-            typeof err === 'string' ? err : 'Fee estimate unavailable',
-          );
+          const msg = typeof err === 'string' ? err : err?.message ?? 'Fee estimate unavailable';
+          setFeeError(msg);
         }
       })
       .finally(() => {
@@ -414,7 +413,12 @@ function SendSheetContent({
             )}
           </div>
           <button
-            onClick={() => setAmountInput(String(offchainBalanceSat))}
+            onClick={() => {
+              setAmountInput(String(offchainBalanceSat));
+              if (addressType === 'bitcoin' && address.trim() && offchainBalanceSat > 0) {
+                fetchFee(address.trim(), offchainBalanceSat);
+              }
+            }}
             className="text-[10px] theme-accent hover:opacity-80 mt-0.5 transition-colors"
           >
             Send max
@@ -438,7 +442,15 @@ function SendSheetContent({
                 </p>
               )}
               {feeError && (
-                <p className="text-xs theme-warning">{feeError}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs theme-warning">{feeError}</p>
+                  <button
+                    onClick={() => fetchFee(address.trim(), amountSats!)}
+                    className="shrink-0 text-[10px] theme-accent hover:opacity-80 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -667,8 +679,9 @@ function SendSheet({
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-40 bg-black/60" />
         <Drawer.Content
-          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[90vh] flex-col rounded-t-3xl theme-drawer px-6 pt-6 pb-8 outline-none"
+          className="fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-3xl theme-drawer px-6 pt-6 pb-8 outline-none"
           style={{
+            height: 'calc(var(--app-height) * 0.65)',
             paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 32px)',
           }}
         >

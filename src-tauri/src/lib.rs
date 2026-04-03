@@ -253,6 +253,10 @@ pub fn run() {
             commands::wallet::get_mnemonic,
             commands::wallet::get_receive_address,
             commands::wallet::settle,
+            // Coins / VTXOs
+            commands::coins::get_vtxos,
+            commands::coins::estimate_renew_fees,
+            commands::coins::renew_vtxos,
             // Lightning / swaps
             commands::lightning::get_ln_invoice,
             commands::lightning::debug_list_swaps,
