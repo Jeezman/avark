@@ -3,9 +3,20 @@ use std::sync::Arc;
 use ark_client::lightning_invoice::Bolt11Invoice;
 use serde::Serialize;
 use tauri::{Emitter, Manager};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{AppError, GlobalWalletState};
+
+/// Check if an error string indicates a transient transport/connection issue.
+fn is_transient_error(err: &str) -> bool {
+    let lower = err.to_lowercase();
+    lower.contains("transport error")
+        || lower.contains("connection reset")
+        || lower.contains("connection refused")
+        || lower.contains("broken pipe")
+        || lower.contains("timed out")
+        || lower.contains("hyper::error")
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -251,6 +262,9 @@ pub struct FeeEstimate {
     fee_sat: i64,
 }
 
+const FEE_ESTIMATE_MAX_RETRIES: u32 = 3;
+const FEE_ESTIMATE_RETRY_DELAY_MS: u64 = 500;
+
 #[tauri::command]
 pub async fn estimate_onchain_send_fee(
     app: tauri::AppHandle,
@@ -277,17 +291,44 @@ pub async fn estimate_onchain_send_fee(
 
     let amount = bitcoin::Amount::from_sat(amount_sat);
 
-    use rand::SeedableRng;
-    let mut rng = rand::rngs::StdRng::from_entropy();
+    let mut last_err = String::new();
+    for attempt in 1..=FEE_ESTIMATE_MAX_RETRIES {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::from_entropy();
 
-    let fee = client
-        .estimate_onchain_fees(&mut rng, btc_addr, amount)
-        .await
-        .map_err(|e| AppError::Wallet(format!("Fee estimation failed: {e}")))?;
+        match client
+            .estimate_onchain_fees(&mut rng, btc_addr.clone(), amount)
+            .await
+        {
+            Ok(fee) => {
+                return Ok(FeeEstimate {
+                    fee_sat: fee.to_sat(),
+                })
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                if attempt < FEE_ESTIMATE_MAX_RETRIES && is_transient_error(&last_err) {
+                    warn!(
+                        attempt,
+                        error = %last_err,
+                        "fee estimation failed with transient error, retrying"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        FEE_ESTIMATE_RETRY_DELAY_MS * u64::from(attempt),
+                    ))
+                    .await;
+                    continue;
+                }
+            }
+        }
+    }
 
-    Ok(FeeEstimate {
-        fee_sat: fee.to_sat(),
-    })
+    let friendly = if is_transient_error(&last_err) {
+        "Could not reach the ASP server. Check your connection and try again.".to_string()
+    } else {
+        format!("Fee estimation failed: {last_err}")
+    };
+    Err(AppError::Wallet(friendly))
 }
 
 #[cfg(test)]

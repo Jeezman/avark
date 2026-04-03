@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { Link } from '@tanstack/react-router';
@@ -28,6 +28,10 @@ export function DashboardRoute() {
   const [sendOpen, setSendOpen] = useState(false);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [settling, setSettling] = useState(false);
+  const sortedSwaps = useMemo(
+    () => [...swaps].sort((a, b) => b.created_at - a.created_at),
+    [swaps],
+  );
 
   const totalSat =
     (balance?.onchain_confirmed_sat ?? 0) + (balance?.offchain_total_sat ?? 0);
@@ -221,7 +225,7 @@ export function DashboardRoute() {
             Lightning Swaps
           </h2>
           <div className="space-y-2">
-            {swaps.map((swap) => {
+            {sortedSwaps.map((swap) => {
               const isClaimable = swap.has_preimage && !swap.is_terminal;
               const isClaiming = claimingId === swap.id;
               return (

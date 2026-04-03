@@ -5,6 +5,7 @@ import { DashboardRoute } from "./routes/dashboard-route";
 import { OnboardingRoute } from "./routes/onboarding-route";
 import { TransactionsRoute } from "./routes/transactions-route";
 import { SettingsRoute } from "./routes/settings-route";
+import { CoinsRoute } from "./routes/coins-route";
 import { AppLayout } from "./components/AppLayout";
 
 const rootRoute = createRootRoute();
@@ -53,6 +54,12 @@ const transactionsRoute = createRoute({
   component: TransactionsRoute,
 });
 
+const coinsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/coins",
+  component: CoinsRoute,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: "/settings",
@@ -62,7 +69,7 @@ const settingsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   bootRoute,
   onboardingRoute,
-  appLayoutRoute.addChildren([dashboardRoute, transactionsRoute, settingsRoute]),
+  appLayoutRoute.addChildren([dashboardRoute, transactionsRoute, coinsRoute, settingsRoute]),
 ]);
 
 export const router = createRouter({
