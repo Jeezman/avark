@@ -24,6 +24,7 @@ export interface WalletBalance {
   offchain_pre_confirmed_sat: number;
   offchain_recoverable_sat: number;
   offchain_total_sat: number;
+  boarding_sat: number;
 }
 
 export interface TransactionRecord {

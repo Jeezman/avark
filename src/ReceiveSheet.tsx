@@ -1,18 +1,35 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import QRCode from 'react-qr-code';
 import { Drawer } from 'vaul';
 import { useLnInvoice } from './hooks/useLnInvoice';
+import { formatSats } from './utils/format';
+import { launchConfetti } from './utils/confetti';
+import { playSuccessSound, triggerHaptic } from './utils/receiveFeedback';
 
 interface ReceiveSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onReceived?: () => void;
 }
 
 interface ReceiveAddresses {
   ark_address: string;
   boarding_address: string;
+}
+
+interface WalletBalance {
+  boarding_sat: number;
+}
+
+type ReceiveType = 'Ark Transfer' | 'Boarding' | 'Lightning';
+
+interface ReceivedPayment {
+  amount_sat: number;
+  type: ReceiveType;
+  timestamp: Date;
 }
 
 /** Convert sats to BTC string using integer math (no floating point). */
@@ -89,20 +106,272 @@ function CopyRow({
   );
 }
 
-function ReceiveSheetContent() {
+// ── Confirmation View ──────────────────────────────────────────────────
+
+interface ConfirmationViewProps {
+  payment: ReceivedPayment;
+  onDone: () => void;
+  onAutoClose: () => void;
+}
+
+interface SettleResult {
+  settled: boolean;
+  txid: string | null;
+}
+
+function ConfirmationView({ payment, onDone, onAutoClose }: ConfirmationViewProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [settling, setSettling] = useState(false);
+  const [animateIn, setAnimateIn] = useState(false);
+  const [displayAmount, setDisplayAmount] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedbackFired = useRef(false);
+
+  // Entrance animation sequence
+  useEffect(() => {
+    requestAnimationFrame(() => setAnimateIn(true));
+  }, []);
+
+  // Animated amount counter
+  useEffect(() => {
+    if (!animateIn) return;
+    const target = payment.amount_sat;
+    const duration = 600;
+    const start = performance.now();
+    function tick(now: number) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayAmount(Math.round(target * eased));
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }, [animateIn, payment.amount_sat]);
+
+  // Launch confetti + sound + haptic on mount
+  useEffect(() => {
+    if (canvasRef.current) launchConfetti(canvasRef.current);
+    if (!feedbackFired.current) {
+      feedbackFired.current = true;
+      playSuccessSound();
+      triggerHaptic();
+    }
+  }, []);
+
+  // Auto-dismiss after 3s unless details are open
+  useEffect(() => {
+    if (detailsOpen) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      return;
+    }
+    timerRef.current = setTimeout(onAutoClose, 3000);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [detailsOpen, onAutoClose]);
+
+  const handleSettle = async () => {
+    setSettling(true);
+    try {
+      const result = await invoke<SettleResult>('settle');
+      if (result.settled) {
+        toast.success(`Settled into round (txid: ${result.txid})`);
+      } else {
+        toast.info('Nothing to settle');
+      }
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setSettling(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center relative overflow-hidden">
+      {/* Confetti canvas */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full pointer-events-none z-20"
+      />
+
+      {/* Radial glow backdrop */}
+      <div
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-80 rounded-full pointer-events-none transition-opacity duration-700"
+        style={{
+          background: 'radial-gradient(circle, rgba(190,242,100,0.15) 0%, transparent 70%)',
+          opacity: animateIn ? 1 : 0,
+        }}
+      />
+
+      {/* Animated checkmark with ring */}
+      <div
+        className="relative z-10 mt-6 mb-5 transition-all duration-500"
+        style={{
+          transform: animateIn ? 'scale(1)' : 'scale(0.3)',
+          opacity: animateIn ? 1 : 0,
+        }}
+      >
+        {/* Outer pulsing ring */}
+        <div
+          className="absolute inset-0 rounded-full"
+          style={{
+            background: 'conic-gradient(from 0deg, rgba(190,242,100,0.4), rgba(190,242,100,0.05), rgba(190,242,100,0.4))',
+            animation: 'spin 3s linear infinite',
+            margin: '-3px',
+            borderRadius: '9999px',
+          }}
+        />
+        <div className="relative rounded-full p-5" style={{ background: 'rgba(190,242,100,0.12)' }}>
+          <div className="rounded-full p-4" style={{ background: 'rgba(190,242,100,0.15)' }}>
+            <svg
+              className="h-12 w-12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#bef264"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                strokeDasharray: 30,
+                strokeDashoffset: animateIn ? 0 : 30,
+                transition: 'stroke-dashoffset 0.5s ease-out 0.3s',
+              }}
+            >
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      {/* Amount with counter animation */}
+      <div
+        className="relative z-10 text-center transition-all duration-500 delay-200"
+        style={{
+          transform: animateIn ? 'translateY(0)' : 'translateY(12px)',
+          opacity: animateIn ? 1 : 0,
+        }}
+      >
+        <p className="text-4xl font-bold tabular-nums tracking-tight" style={{ color: '#bef264' }}>
+          +{formatSats(displayAmount)}
+        </p>
+        <p className="text-sm theme-text-muted mt-0.5">sats received</p>
+      </div>
+
+      {/* Type badge */}
+      <div
+        className="relative z-10 mt-3 mb-6 transition-all duration-500 delay-300"
+        style={{
+          transform: animateIn ? 'translateY(0)' : 'translateY(8px)',
+          opacity: animateIn ? 1 : 0,
+        }}
+      >
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
+          style={{ background: 'rgba(190,242,100,0.1)', color: '#bef264' }}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-lime-400" />
+          {payment.type}
+        </span>
+      </div>
+
+      {/* View details / Details card */}
+      <div
+        className="relative z-10 w-full transition-all duration-500 delay-400"
+        style={{
+          transform: animateIn ? 'translateY(0)' : 'translateY(8px)',
+          opacity: animateIn ? 1 : 0,
+        }}
+      >
+        {!detailsOpen ? (
+          <button
+            onClick={() => setDetailsOpen(true)}
+            className="w-full py-2 text-xs theme-text-muted hover:theme-accent transition-colors"
+          >
+            View details
+            <svg className="inline-block ml-1 h-3 w-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+        ) : (
+          <div
+            className="w-full rounded-2xl border p-4 mb-3 space-y-3"
+            style={{
+              background: 'rgba(255,255,255,0.03)',
+              borderColor: 'rgba(255,255,255,0.06)',
+            }}
+          >
+            <div className="flex justify-between items-center">
+              <span className="text-xs theme-text-muted">Amount</span>
+              <span className="text-xs font-semibold tabular-nums theme-text">
+                {formatSats(payment.amount_sat)} sats
+              </span>
+            </div>
+            <div className="h-px" style={{ background: 'rgba(255,255,255,0.05)' }} />
+            <div className="flex justify-between items-center">
+              <span className="text-xs theme-text-muted">Type</span>
+              <span className="text-xs font-semibold theme-text">{payment.type}</span>
+            </div>
+            <div className="h-px" style={{ background: 'rgba(255,255,255,0.05)' }} />
+            <div className="flex justify-between items-center">
+              <span className="text-xs theme-text-muted">Time</span>
+              <span className="text-xs font-semibold theme-text">
+                {payment.timestamp.toLocaleTimeString(undefined, {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}
+              </span>
+            </div>
+            {payment.type === 'Boarding' && (
+              <>
+                <div className="h-px" style={{ background: 'rgba(255,255,255,0.05)' }} />
+                <button
+                  disabled={settling}
+                  onClick={() => void handleSettle()}
+                  className="w-full rounded-xl py-2.5 text-sm font-bold text-gray-900 active:scale-95 transition-all disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #bef264, #84cc16)' }}
+                >
+                  {settling ? 'Settling...' : 'Settle now'}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Done button */}
+      {detailsOpen && (
+        <button
+          onClick={onDone}
+          className="relative z-10 w-full rounded-2xl py-3.5 text-sm font-bold theme-text transition-all active:scale-[0.98]"
+          style={{
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.08)',
+          }}
+        >
+          Done
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Main Content ───────────────────────────────────────────────────────
+
+function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
   const [addresses, setAddresses] = useState<ReceiveAddresses | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState('');
+  const [receivedPayments, setReceivedPayments] = useState<ReceivedPayment[]>([]);
+  const [currentPaymentIndex, setCurrentPaymentIndex] = useState(0);
+  const initialBoardingSat = useRef<number | null>(null);
 
   const amountSats = /^\d+$/.test(amountInput) ? Number(amountInput) : null;
   const ln = useLnInvoice();
 
-  // Show the invoice in the BIP21 URI only if it matches the current amount
   const lnInvoiceForQr =
     ln.invoice && ln.invoiceAmount === amountSats ? ln.invoice : null;
 
-  // Unified BIP21 URI: always includes ark address, adds lightning when available
   const qrValue = addresses
     ? buildBip21(
         addresses.boarding_address,
@@ -112,16 +381,18 @@ function ReceiveSheetContent() {
       )
     : null;
 
+  const currentPayment = receivedPayments[currentPaymentIndex] ?? null;
+  const showConfirmation = currentPayment !== null;
+
+  // Fetch addresses and start subscription
   useEffect(() => {
     let cancelled = false;
-    // Track the in-flight subscription start so cleanup can wait for it.
     let subscriptionStarted: Promise<unknown> = Promise.resolve();
 
     invoke<ReceiveAddresses>('get_receive_address')
       .then((result) => {
         if (cancelled) return;
         setAddresses(result);
-        // Subscribe to the exact address we're displaying in the QR code.
         subscriptionStarted = invoke('start_receive_subscription', {
           arkAddress: result.ark_address,
         }).catch((err) => {
@@ -140,13 +411,63 @@ function ReceiveSheetContent() {
 
     return () => {
       cancelled = true;
-      // Wait for any in-flight start to finish, then stop.
       void subscriptionStarted.then(() =>
         invoke('stop_receive_subscription').catch((err) => {
           console.warn('Failed to stop receive subscription:', err);
         }),
       );
     };
+  }, []);
+
+  // Listen for Ark payment-received events
+  useEffect(() => {
+    const unlisten = listen<{ amount_sat: number }>('payment-received', (event) => {
+      setReceivedPayments((prev) => [
+        ...prev,
+        {
+          amount_sat: event.payload.amount_sat,
+          type: 'Ark Transfer',
+          timestamp: new Date(),
+        },
+      ]);
+    });
+
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, []);
+
+  // Poll boarding balance for onchain receives
+  useEffect(() => {
+    // Capture initial boarding balance
+    invoke<WalletBalance>('get_balance')
+      .then((bal) => {
+        initialBoardingSat.current = bal.boarding_sat;
+      })
+      .catch(() => {});
+
+    const interval = setInterval(async () => {
+      if (initialBoardingSat.current === null) return;
+      try {
+        const bal = await invoke<WalletBalance>('get_balance');
+        const increase = bal.boarding_sat - initialBoardingSat.current;
+        if (increase > 0) {
+          initialBoardingSat.current = bal.boarding_sat;
+          setReceivedPayments((prev) => [
+            ...prev,
+            {
+              amount_sat: increase,
+              type: 'Boarding',
+              timestamp: new Date(),
+            },
+          ]);
+        }
+      } catch {
+        // Balance query failed, skip
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const handleAmountChange = useCallback(
@@ -158,6 +479,31 @@ function ReceiveSheetContent() {
     },
     [],
   );
+
+  const handleConfirmationDone = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
+  const handleAutoClose = useCallback(() => {
+    // If there are more payments queued, show the next one
+    if (currentPaymentIndex < receivedPayments.length - 1) {
+      setCurrentPaymentIndex((i) => i + 1);
+    } else {
+      onClose();
+    }
+  }, [currentPaymentIndex, receivedPayments.length, onClose]);
+
+  // Show confirmation view
+  if (showConfirmation) {
+    return (
+      <ConfirmationView
+        key={currentPaymentIndex}
+        payment={currentPayment}
+        onDone={handleConfirmationDone}
+        onAutoClose={handleAutoClose}
+      />
+    );
+  }
 
   return (
     <>
@@ -285,7 +631,12 @@ function ReceiveSheetContent() {
   );
 }
 
-function ReceiveSheet({ open, onOpenChange }: ReceiveSheetProps) {
+function ReceiveSheet({ open, onOpenChange, onReceived }: ReceiveSheetProps) {
+  const handleClose = useCallback(() => {
+    onOpenChange(false);
+    onReceived?.();
+  }, [onOpenChange, onReceived]);
+
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange}>
       <Drawer.Portal>
@@ -307,7 +658,7 @@ function ReceiveSheet({ open, onOpenChange }: ReceiveSheetProps) {
           </Drawer.Description>
 
           <div className="overflow-y-auto">
-            {open && <ReceiveSheetContent />}
+            {open && <ReceiveSheetContent onClose={handleClose} />}
           </div>
         </Drawer.Content>
       </Drawer.Portal>

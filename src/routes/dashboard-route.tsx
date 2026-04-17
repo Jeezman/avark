@@ -7,7 +7,6 @@ import SendSheet from '../SendSheet';
 import { useWallet } from '../context/WalletContext';
 import { formatSats } from '../utils/format';
 import { TransactionRow } from '../components/TransactionRow';
-import { LightningSwaps } from '../components/LightningSwaps';
 
 interface SettleResult {
   settled: boolean;
@@ -18,7 +17,6 @@ export function DashboardRoute() {
   const {
     balance,
     transactions,
-    swaps,
     refreshing,
     autoRefresh,
     setAutoRefresh,
@@ -30,7 +28,9 @@ export function DashboardRoute() {
   const [settling, setSettling] = useState(false);
 
   const totalSat =
-    (balance?.onchain_confirmed_sat ?? 0) + (balance?.offchain_total_sat ?? 0);
+    (balance?.onchain_confirmed_sat ?? 0) +
+    (balance?.onchain_pending_sat ?? 0) +
+    (balance?.offchain_total_sat ?? 0);
 
   return (
     <main
@@ -118,42 +118,6 @@ export function DashboardRoute() {
           </svg>
           Receive
         </button>
-        <button
-          disabled={settling}
-          onClick={async () => {
-            setSettling(true);
-            try {
-              const result = await invoke<SettleResult>('settle');
-              if (result.settled) {
-                toast.success(`Settled into round (txid: ${result.txid})`);
-                void fetchData();
-              } else {
-                toast.info(
-                  'Nothing to settle — no spendable boarding UTXOs or VTXOs found',
-                );
-              }
-            } catch (e) {
-              toast.error(String(e));
-            } finally {
-              setSettling(false);
-            }
-          }}
-          className="flex items-center gap-2 rounded-2xl theme-card-elevated px-6 py-2.5 text-sm font-bold theme-text hover:opacity-80 active:scale-95 transition-all disabled:opacity-50"
-        >
-          <svg
-            className={`h-4 w-4 ${settling ? 'animate-spin' : ''}`}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="23 4 23 10 17 10" />
-            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-          </svg>
-          {settling ? 'Settling...' : 'Settle'}
-        </button>
       </div>
 
       {/* Balance Breakdown */}
@@ -167,6 +131,32 @@ export function DashboardRoute() {
             <p className="text-xs theme-warning mt-0.5">
               +{formatSats(balance!.onchain_pending_sat)} pending
             </p>
+          )}
+          {(balance?.boarding_sat ?? 0) > 0 && (
+            <button
+              disabled={settling}
+              onClick={async () => {
+                setSettling(true);
+                try {
+                  const result = await invoke<SettleResult>('settle');
+                  if (result.settled) {
+                    toast.success(`Settled into round (txid: ${result.txid})`);
+                    void fetchData();
+                  } else {
+                    toast.info('Nothing to settle');
+                  }
+                } catch (e) {
+                  toast.error(String(e));
+                } finally {
+                  setSettling(false);
+                }
+              }}
+              className="text-xs theme-accent mt-1 hover:underline disabled:opacity-50"
+            >
+              {settling
+                ? 'Settling...'
+                : `+${formatSats(balance!.boarding_sat)} boarding — Tap to settle`}
+            </button>
           )}
         </div>
         <div className="rounded-2xl theme-card p-4">
@@ -216,7 +206,7 @@ export function DashboardRoute() {
 
       {/* <LightningSwaps swaps={swaps} onClaimed={() => void fetchData()} /> */}
 
-      <ReceiveSheet open={receiveOpen} onOpenChange={setReceiveOpen} />
+      <ReceiveSheet open={receiveOpen} onOpenChange={setReceiveOpen} onReceived={() => void fetchData()} />
       <SendSheet
         open={sendOpen}
         onOpenChange={setSendOpen}

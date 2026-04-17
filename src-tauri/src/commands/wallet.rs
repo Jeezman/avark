@@ -488,6 +488,7 @@ pub struct WalletBalance {
     offchain_pre_confirmed_sat: u64,
     offchain_recoverable_sat: u64,
     offchain_total_sat: u64,
+    boarding_sat: u64,
 }
 
 #[tauri::command]
@@ -513,6 +514,15 @@ pub async fn get_balance(app: tauri::AppHandle) -> Result<WalletBalance, AppErro
             .map_err(|e| AppError::Wallet(format!("Failed to get onchain balance: {e}")))?
     };
 
+    // Query boarding address UTXOs via Esplora
+    let boarding_sat = match query_boarding_balance(&app, &client).await {
+        Ok(sat) => sat,
+        Err(e) => {
+            tracing::warn!("failed to query boarding balance: {e}");
+            0
+        }
+    };
+
     Ok(WalletBalance {
         onchain_confirmed_sat: onchain.confirmed.to_sat(),
         onchain_pending_sat: onchain.trusted_pending.to_sat() + onchain.untrusted_pending.to_sat(),
@@ -520,7 +530,47 @@ pub async fn get_balance(app: tauri::AppHandle) -> Result<WalletBalance, AppErro
         offchain_pre_confirmed_sat: offchain.pre_confirmed().to_sat(),
         offchain_recoverable_sat: offchain.recoverable().to_sat(),
         offchain_total_sat: offchain.total().to_sat(),
+        boarding_sat,
     })
+}
+
+async fn query_boarding_balance(
+    app: &tauri::AppHandle,
+    client: &crate::ark::ArkClient,
+) -> Result<u64, AppError> {
+    let boarding_address = client
+        .get_boarding_address()
+        .map_err(|e| AppError::Wallet(format!("Failed to get boarding address: {e}")))?;
+
+    let wallet_data = read_wallet_data(app).await?;
+    let network = wallet_data
+        .network
+        .parse::<bitcoin::Network>()
+        .map_err(|e| AppError::Wallet(format!("Invalid network: {e}")))?;
+    let custom_esplora = {
+        let state = app.state::<SettingsLock>();
+        let _lock = state.0.read().await;
+        read_settings(app).await.ok().and_then(|s| s.esplora_url)
+    };
+    let esplora_base = crate::ark::esplora_url(network, custom_esplora.as_deref());
+
+    let script_pubkey = boarding_address.script_pubkey();
+    let script_hash = bitcoin::hashes::sha256::Hash::hash(script_pubkey.as_bytes());
+    let utxo_url = format!("{esplora_base}/scripthash/{script_hash:x}/utxo");
+
+    let http = reqwest::Client::new();
+    let utxos: Vec<EsploraUtxo> = http
+        .get(&utxo_url)
+        .send()
+        .await
+        .map_err(|e| AppError::Wallet(format!("Failed to query boarding UTXOs: {e}")))?
+        .error_for_status()
+        .map_err(|e| AppError::Wallet(format!("Boarding UTXO request failed: {e}")))?
+        .json()
+        .await
+        .map_err(|e| AppError::Wallet(format!("Failed to parse boarding UTXOs: {e}")))?;
+
+    Ok(utxos.iter().map(|u| u.value).sum())
 }
 
 #[derive(Serialize)]
@@ -625,6 +675,7 @@ pub async fn get_mnemonic(app: tauri::AppHandle) -> Result<String, AppError> {
 struct EsploraUtxo {
     txid: bitcoin::Txid,
     vout: u32,
+    value: u64,
 }
 
 #[derive(Serialize)]
