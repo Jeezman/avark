@@ -30,6 +30,14 @@ pub(crate) struct Settings {
     pub(crate) theme: Option<Theme>,
     #[serde(default)]
     pub(crate) esplora_url: Option<String>,
+    #[serde(default)]
+    pub(crate) pin_hash: Option<String>,
+    #[serde(default)]
+    pub(crate) pin_salt: Option<String>,
+    #[serde(default)]
+    pub(crate) max_pin_attempts: Option<u32>,
+    #[serde(default)]
+    pub(crate) pin_failed_attempts: Option<u32>,
 }
 
 pub(crate) struct AppWalletState {
@@ -270,6 +278,13 @@ pub fn run() {
             commands::send::send_ark,
             commands::send::send_onchain,
             commands::send::estimate_onchain_send_fee,
+            // PIN security
+            commands::pin::get_pin_status,
+            commands::pin::set_pin,
+            commands::pin::verify_pin,
+            commands::pin::clear_pin,
+            commands::pin::set_max_pin_attempts,
+            commands::wallet::verify_mnemonic,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

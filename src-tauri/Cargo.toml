@@ -44,6 +44,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+subtle = "2"
+hex = "0.4"
 
 # Vendor OpenSSL for Android cross-compilation (ark-bdk-wallet pulls in native-tls via esplora-client)
 openssl = { version = "0.10", features = ["vendored"], optional = true }

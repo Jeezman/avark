@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
 import { useTheme } from "../context/ThemeContext";
+import { PinSetupFlow, PinDisableFlow, usePinLock } from "../context/PinLockContext";
 
 interface SettingsData {
   asp_url: string | null;
@@ -97,6 +98,9 @@ export function SettingsRoute() {
   const [deleting, setDeleting] = useState(false);
   const [esploraInput, setEsploraInput] = useState("");
   const [savingEsplora, setSavingEsplora] = useState(false);
+  const { pinEnabled, refreshPinStatus } = usePinLock();
+  const [pinFlow, setPinFlow] = useState<"none" | "setup" | "disable">("none");
+  const [maxAttempts, setMaxAttempts] = useState(10);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -113,6 +117,12 @@ export function SettingsRoute() {
   useEffect(() => {
     void fetchSettings();
   }, [fetchSettings]);
+
+  useEffect(() => {
+    invoke<{ max_attempts: number }>("get_pin_status")
+      .then((s) => setMaxAttempts(s.max_attempts))
+      .catch(() => {});
+  }, [pinEnabled]);
 
   const handleRevealSeed = async () => {
     if (mnemonic) {
@@ -148,6 +158,24 @@ export function SettingsRoute() {
     }
   };
 
+  // PIN setup/disable flows render full-screen
+  if (pinFlow === "setup") {
+    return (
+      <PinSetupFlow
+        onComplete={() => { setPinFlow("none"); void refreshPinStatus(); }}
+        onCancel={() => setPinFlow("none")}
+      />
+    );
+  }
+  if (pinFlow === "disable") {
+    return (
+      <PinDisableFlow
+        onComplete={() => { setPinFlow("none"); void refreshPinStatus(); }}
+        onCancel={() => setPinFlow("none")}
+      />
+    );
+  }
+
   return (
     <main className="theme-text" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       {/* Header */}
@@ -180,6 +208,77 @@ export function SettingsRoute() {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Security */}
+      <div className="px-6 mb-6">
+        <h2 className="text-xs font-semibold theme-text-muted uppercase tracking-wider mb-3">Security</h2>
+        <div className="rounded-2xl theme-card p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm">PIN Lock</span>
+            {pinEnabled ? (
+              <button
+                onClick={() => setPinFlow("disable")}
+                className="rounded-lg px-3 py-1 text-xs font-medium theme-accent-bg"
+              >
+                Enabled
+              </button>
+            ) : (
+              <button
+                onClick={() => setPinFlow("setup")}
+                className="rounded-lg px-3 py-1 text-xs font-medium theme-card-elevated theme-text-muted"
+              >
+                Disabled
+              </button>
+            )}
+          </div>
+          {pinEnabled && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Max PIN attempts</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      const prev = maxAttempts;
+                      const next = Math.max(3, maxAttempts - 1);
+                      setMaxAttempts(next);
+                      try {
+                        await invoke("set_max_pin_attempts", { max_attempts: next });
+                      } catch (e) {
+                        setMaxAttempts(prev);
+                        toast.error(typeof e === "string" ? e : "Failed to update");
+                      }
+                    }}
+                    disabled={maxAttempts <= 3}
+                    className="h-7 w-7 rounded-lg theme-card-elevated flex items-center justify-center text-sm font-bold disabled:opacity-30"
+                    aria-label="Decrease max attempts"
+                  >
+                    -
+                  </button>
+                  <span className="text-sm font-semibold w-6 text-center tabular-nums">
+                    {maxAttempts}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      const prev = maxAttempts;
+                      const next = Math.min(10, maxAttempts + 1);
+                      setMaxAttempts(next);
+                      try {
+                        await invoke("set_max_pin_attempts", { max_attempts: next });
+                      } catch (e) {
+                        setMaxAttempts(prev);
+                        toast.error(typeof e === "string" ? e : "Failed to update");
+                      }
+                    }}
+                    disabled={maxAttempts >= 10}
+                    className="h-7 w-7 rounded-lg theme-card-elevated flex items-center justify-center text-sm font-bold disabled:opacity-30"
+                    aria-label="Increase max attempts"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+          )}
         </div>
       </div>
 

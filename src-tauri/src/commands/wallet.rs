@@ -670,6 +670,41 @@ pub async fn get_mnemonic(app: tauri::AppHandle) -> Result<String, AppError> {
     load_mnemonic(store)
 }
 
+#[tauri::command]
+pub async fn verify_mnemonic(app: tauri::AppHandle, mnemonic: String) -> Result<bool, AppError> {
+    use subtle::ConstantTimeEq;
+
+    let store = secure_storage::SecureStorage::get_instance(&app);
+    let stored = load_mnemonic(store)?;
+
+    let input_normalized: String = mnemonic.split_whitespace().collect::<Vec<_>>().join(" ");
+    let stored_normalized: String = stored.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let input_bytes = input_normalized.as_bytes();
+    let stored_bytes = stored_normalized.as_bytes();
+
+    if input_bytes.len() != stored_bytes.len() {
+        return Ok(false);
+    }
+
+    let valid: bool = input_bytes.ct_eq(stored_bytes).into();
+
+    if valid {
+        warn!("wallet unlocked via seed-phrase recovery");
+        let _ = app.emit(
+            "security-event",
+            super::pin::SecurityEvent {
+                kind: "seed-recovery",
+                detail: "Wallet unlocked via seed phrase",
+            },
+        );
+    } else {
+        warn!("seed-phrase recovery attempted — mismatch");
+    }
+
+    Ok(valid)
+}
+
 /// Minimal representation of Esplora's `/scripthash/:hash/utxo` response items.
 #[derive(Deserialize)]
 struct EsploraUtxo {
