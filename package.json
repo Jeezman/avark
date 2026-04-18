@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint src",
-    "android-dev-icons": "node scripts/build-android-dev-icons.mjs"
+    "android-dev-icons": "node scripts/build-android-dev-icons.mjs",
+    "dev:android": "node scripts/android-dev.mjs"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.166.3",

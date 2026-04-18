@@ -285,6 +285,8 @@ pub fn run() {
             commands::pin::clear_pin,
             commands::pin::set_max_pin_attempts,
             commands::wallet::verify_mnemonic,
+            // Splash
+            commands::splash::splash_ready,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,4 +4,5 @@ pub mod pin;
 pub mod receive;
 pub mod send;
 pub mod settings;
+pub mod splash;
 pub mod wallet;

@@ -26,9 +26,11 @@ android {
     }
     buildTypes {
         getByName("debug") {
-            // Install debug builds alongside release under a distinct package
-            // so the two never clobber each other on-device. Debug gets its
-            // own app icon + label overrides via src/debug/res/.
+            // Debug installs as `com.jeezman.avark.debug` so it coexists with
+            // the release `com.jeezman.avark`. Tauri's auto-launch targets the
+            // base identifier — the `scripts/android-dev.mjs` wrapper watches
+            // logcat and redirects each launch to the .debug variant. Run dev
+            // via `pnpm dev:android`, not `pnpm tauri android dev` directly.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -67,6 +69,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.activity:activity-ktx:1.10.1")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("com.google.android.material:material:1.12.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")

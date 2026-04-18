@@ -53,6 +53,13 @@ openssl = { version = "0.10", features = ["vendored"], optional = true }
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "apple-native", "windows-native"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# Used by the `splash_ready` command to call back into MainActivity.kt and
+# dismiss the Android SplashScreen once React has painted. See
+# commands/splash.rs and MainActivity.kt.
+jni = "0.21"
+ndk-context = "0.1"
+
 [features]
 vendored-openssl = ["dep:openssl"]
 
