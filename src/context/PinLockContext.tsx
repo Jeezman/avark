@@ -35,7 +35,13 @@ export function usePinLock() {
 
 // ── Lock Screen ────────────────────────────────────────────────────────
 
-function LockScreen({ onUnlock }: { onUnlock: () => void }) {
+function LockScreen({
+  onUnlock,
+  onWipe,
+}: {
+  onUnlock: () => void;
+  onWipe: () => void;
+}) {
   const [error, setError] = useState<string | undefined>();
   const [attemptsRemaining, setAttemptsRemaining] = useState<number | undefined>();
   const [maxAttempts, setMaxAttempts] = useState<number | undefined>();
@@ -44,6 +50,10 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const [mnemonicInput, setMnemonicInput] = useState('');
   const [recovering, setRecovering] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | undefined>();
+  const [showWipe, setShowWipe] = useState(false);
+  const [wipeConfirm, setWipeConfirm] = useState('');
+  const [wiping, setWiping] = useState(false);
+  const [wipeError, setWipeError] = useState<string | undefined>();
 
   // Countdown timer for cooldown
   useEffect(() => {
@@ -104,8 +114,93 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
     }
   }, [mnemonicInput, onUnlock]);
 
-  // Lockout screen
+  // Last-resort escape hatch for users who've genuinely lost their seed
+  // phrase. Deletes the wallet and clears the PIN. They don't recover the
+  // original funds — that's the self-custody contract — but they get the
+  // app back to onboard a fresh wallet. Gated by a typed "WIPE" confirmation
+  // so it's not a one-tap mistake.
+  const handleWipe = useCallback(async () => {
+    if (wipeConfirm.trim().toUpperCase() !== 'WIPE') return;
+    setWiping(true);
+    setWipeError(undefined);
+    try {
+      await invoke('delete_wallet');
+      await invoke('clear_pin');
+      toast.success('Wallet wiped — starting fresh');
+      onWipe();
+    } catch (e) {
+      setWipeError(String(e));
+      setWiping(false);
+    }
+  }, [wipeConfirm, onWipe]);
+
+  // Lockout screen — seed-phrase recovery, with an escape hatch for the
+  // user who's genuinely lost their 12 words.
   if (isLocked) {
+    if (showWipe) {
+      const confirmed = wipeConfirm.trim().toUpperCase() === 'WIPE';
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen theme-bg theme-text px-6 py-10">
+          <div className="mb-6 rounded-full p-4" style={{ background: 'rgba(248,113,113,0.15)' }}>
+            <svg className="h-12 w-12 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold mb-2">Wipe this wallet?</h1>
+          <div className="max-w-sm text-sm theme-text-muted text-center space-y-3 mb-6">
+            <p>
+              Without your seed phrase, the Bitcoin in this wallet can't be recovered — on this device or any other. Avark never had a copy, and can't restore it. That's what self-custody means.
+            </p>
+            <p>
+              If you have the 12 words written down anywhere, keep looking. If they're truly gone, you can wipe this wallet and start fresh. You won't recover the old funds.
+            </p>
+          </div>
+
+          <div className="w-full max-w-sm">
+            <label className="block text-xs theme-text-muted mb-2">
+              Type <span className="font-mono font-bold theme-text">WIPE</span> to confirm
+            </label>
+            <input
+              value={wipeConfirm}
+              onChange={(e) => setWipeConfirm(e.target.value)}
+              placeholder="WIPE"
+              disabled={wiping}
+              className="w-full rounded-xl theme-input px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-red-400/50 font-mono uppercase disabled:opacity-60"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {wipeError && (
+              <p className="text-xs text-red-400 mt-2">{wipeError}</p>
+            )}
+            <button
+              onClick={() => void handleWipe()}
+              disabled={wiping || !confirmed}
+              className="w-full mt-4 rounded-xl py-3 text-sm font-bold text-white active:scale-95 transition-transform disabled:opacity-40"
+              style={{ background: 'linear-gradient(135deg, #f87171, #dc2626)' }}
+            >
+              {wiping ? 'Wiping...' : 'Wipe wallet and start over'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowWipe(false);
+                setWipeConfirm('');
+                setWipeError(undefined);
+              }}
+              disabled={wiping}
+              className="w-full mt-4 text-xs theme-text-muted hover:theme-text transition-colors disabled:opacity-40"
+            >
+              ← Back to seed phrase recovery
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col items-center justify-center min-h-screen theme-bg theme-text px-6">
         <div className="mb-6 rounded-full p-4" style={{ background: 'rgba(248,113,113,0.15)' }}>
@@ -140,6 +235,13 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
             style={{ background: 'linear-gradient(135deg, #bef264, #84cc16)' }}
           >
             {recovering ? 'Verifying...' : 'Recover with seed phrase'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowWipe(true)}
+            className="w-full mt-4 text-xs theme-text-muted hover:theme-text transition-colors underline underline-offset-4"
+          >
+            I don't have my seed phrase
           </button>
         </div>
       </div>
@@ -354,6 +456,15 @@ export function PinLockProvider({ children }: { children: React.ReactNode }) {
     setLocked(false);
   }, []);
 
+  // Wallet has been wiped — drop both gates so the background timer doesn't
+  // immediately re-lock on visibility change (pinEnabled stays true until the
+  // provider remounts otherwise). The boot route picks up no-wallet and
+  // redirects to /onboarding once the router takes over.
+  const handleWipe = useCallback(() => {
+    setPinEnabled(false);
+    setLocked(false);
+  }, []);
+
   if (checking) {
     return (
       <div className="flex items-center justify-center min-h-screen theme-bg">
@@ -366,7 +477,7 @@ export function PinLockProvider({ children }: { children: React.ReactNode }) {
   }
 
   if (locked && pinEnabled) {
-    return <LockScreen onUnlock={handleUnlock} />;
+    return <LockScreen onUnlock={handleUnlock} onWipe={handleWipe} />;
   }
 
   return (
