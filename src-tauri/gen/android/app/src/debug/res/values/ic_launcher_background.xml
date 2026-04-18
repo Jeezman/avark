@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only adaptive-icon background color. Overrides main/values/.
+  Dark red so the dev launcher stands out clearly against the prod one.
+-->
+<resources>
+  <color name="ic_launcher_background">#7f1d1d</color>
+</resources>

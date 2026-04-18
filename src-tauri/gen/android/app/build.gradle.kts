@@ -26,6 +26,11 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            // Install debug builds alongside release under a distinct package
+            // so the two never clobber each other on-device. Debug gets its
+            // own app icon + label overrides via src/debug/res/.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true

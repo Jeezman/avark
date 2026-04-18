@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only string overrides. Merged over src/main/res/values/strings.xml
+  when Gradle builds the `debug` variant (src/main is the default source set).
+  Keep keys in sync with main/values/strings.xml.
+-->
+<resources>
+    <string name="app_name">avark dev</string>
+    <string name="main_activity_title">avark dev</string>
+</resources>
