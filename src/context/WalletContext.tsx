@@ -9,6 +9,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
+import type { VtxoInfo } from "../components/VtxoCard";
 
 export type ConnectionState =
   | "checking"
@@ -46,6 +47,10 @@ export interface SwapRecord {
 }
 
 const DEFAULT_REFRESH_INTERVAL = 30_000;
+// VTXOs are expensive-ish to fetch — keep the cache fresh for this long
+// before a passive mount-time call actually hits the backend. Explicit
+// refreshes (the refresh button, post-renew invalidation) bypass this.
+const VTXOS_STALE_TIME_MS = 30_000;
 
 interface WalletContextValue {
   connectionState: ConnectionState;
@@ -58,6 +63,15 @@ interface WalletContextValue {
   setAutoRefresh: (v: boolean | ((prev: boolean) => boolean)) => void;
   fetchData: () => Promise<void>;
   connectWallet: () => void;
+  vtxos: VtxoInfo[];
+  vtxosLoaded: boolean;
+  refreshingVtxos: boolean;
+  /**
+   * Fetch the VTXO list. Passive calls (no arg) skip the fetch when the
+   * cache is still fresh (< VTXOS_STALE_TIME_MS). Pass `true` to force a
+   * refetch — use after mutations like renew/recover.
+   */
+  fetchVtxos: (force?: boolean) => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextValue>(null!);
@@ -75,6 +89,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [swaps, setSwaps] = useState<SwapRecord[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [vtxos, setVtxos] = useState<VtxoInfo[]>([]);
+  const [vtxosLoaded, setVtxosLoaded] = useState(false);
+  const [refreshingVtxos, setRefreshingVtxos] = useState(false);
+  const lastVtxosFetchRef = useRef(0);
   const cancelledRef = useRef(false);
   const fetchIdRef = useRef(0);
 
@@ -138,6 +156,26 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     },
     [],
   );
+
+  const fetchVtxos = useCallback(async (force = false) => {
+    if (!force) {
+      const age = Date.now() - lastVtxosFetchRef.current;
+      if (lastVtxosFetchRef.current > 0 && age < VTXOS_STALE_TIME_MS) return;
+    }
+    setRefreshingVtxos(true);
+    try {
+      const res = await invoke<{ vtxos: VtxoInfo[] }>("get_vtxos");
+      if (cancelledRef.current) return;
+      setVtxos(res.vtxos);
+      setVtxosLoaded(true);
+      lastVtxosFetchRef.current = Date.now();
+    } catch (e) {
+      if (cancelledRef.current) return;
+      toast.error(typeof e === "string" ? e : "Failed to fetch VTXOs");
+    } finally {
+      if (!cancelledRef.current) setRefreshingVtxos(false);
+    }
+  }, []);
 
   const connectWallet = useCallback(() => {
     cancelledRef.current = false;
@@ -252,6 +290,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         setAutoRefresh,
         fetchData: () => fetchData(),
         connectWallet,
+        vtxos,
+        vtxosLoaded,
+        refreshingVtxos,
+        fetchVtxos,
       }}
     >
       {children}

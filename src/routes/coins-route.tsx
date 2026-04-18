@@ -6,10 +6,6 @@ import { useWallet } from "../context/WalletContext";
 import { VtxoCard } from "../components/VtxoCard";
 import type { VtxoInfo } from "../components/VtxoCard";
 
-interface VtxoListResponse {
-  vtxos: VtxoInfo[];
-}
-
 interface FeeEstimate {
   fee_sat: number;
 }
@@ -35,10 +31,13 @@ function isExpiring(expiresAt: number): boolean {
 }
 
 export function CoinsRoute() {
-  const { fetchData } = useWallet();
-  const [vtxos, setVtxos] = useState<VtxoInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const {
+    fetchData,
+    vtxos,
+    vtxosLoaded,
+    refreshingVtxos,
+    fetchVtxos,
+  } = useWallet();
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [sortKey, setSortKey] = useState<SortKey>("expiry");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -48,19 +47,11 @@ export function CoinsRoute() {
   const [showRenewConfirm, setShowRenewConfirm] = useState(false);
   const [pendingRenewTargets, setPendingRenewTargets] = useState<VtxoInfo[] | null>(null);
 
-  const fetchVtxos = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const res = await invoke<VtxoListResponse>("get_vtxos");
-      setVtxos(res.vtxos);
-    } catch (e) {
-      toast.error(typeof e === "string" ? e : "Failed to fetch VTXOs");
-    } finally {
-      setRefreshing(false);
-      setLoading(false);
-    }
-  }, []);
+  const loading = !vtxosLoaded;
 
+  // On mount, refresh in the background. fetchVtxos() (no-arg) skips the
+  // network call when the cache is still fresh, so re-navigating between
+  // tabs is cheap; first-ever mount triggers the full load.
   useEffect(() => {
     void fetchVtxos();
   }, [fetchVtxos]);
@@ -103,7 +94,7 @@ export function CoinsRoute() {
         const result = await invoke<RenewResult>("renew_vtxos", { outpoints });
         if (result.renewed) {
           toast.success(`${outpoints.length} VTXO${outpoints.length > 1 ? "s" : ""} renewed${result.txid ? ` (txid: ${result.txid})` : ""}`);
-          void fetchVtxos();
+          void fetchVtxos(true);
           void fetchData();
         } else {
           toast.info("Nothing to renew");
@@ -141,7 +132,7 @@ export function CoinsRoute() {
       const result = await invoke<RenewResult>("renew_vtxos", { outpoints });
       if (result.renewed) {
         toast.success(`${outpoints.length} VTXO${outpoints.length > 1 ? "s" : ""} renewed${result.txid ? ` (txid: ${result.txid})` : ""}`);
-        void fetchVtxos();
+        void fetchVtxos(true);
         void fetchData();
       } else {
         toast.info("Nothing to renew");
@@ -170,13 +161,13 @@ export function CoinsRoute() {
       <div className="flex items-center justify-between px-6 pt-4 pb-2">
         <h1 className="text-lg font-bold">Coins</h1>
         <button
-          onClick={() => void fetchVtxos()}
-          disabled={refreshing}
+          onClick={() => void fetchVtxos(true)}
+          disabled={refreshingVtxos}
           className="rounded-full theme-card-elevated p-2 theme-text-secondary hover:opacity-80 transition-colors disabled:opacity-40"
           title="Refresh"
         >
           <svg
-            className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            className={`h-4 w-4 ${refreshingVtxos ? "animate-spin" : ""}`}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
