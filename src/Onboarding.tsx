@@ -93,7 +93,7 @@ function Onboarding({ onWalletChoice }: { onWalletChoice: (choice: "create" | "r
 
   return (
     <div
-      className={`fixed inset-0 z-9998 flex flex-col overflow-hidden touch-none bg-linear-to-br ${slide.gradient} transition-colors duration-300`}
+      className={`w-screen min-h-screen flex flex-col overflow-hidden touch-none bg-linear-to-br ${slide.gradient} transition-colors duration-300`}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >

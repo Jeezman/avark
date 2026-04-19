@@ -2,7 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 
-const DEFAULT_ASP_URL = "https://arkade.computer/";
+const DEFAULT_ASP_URL = import.meta.env.VITE_DEFAULT_ASP_URL ?? "https://arkade.computer/";
 
 interface AspInfo {
   network: string;
@@ -70,7 +70,7 @@ function AspConfig({ onConnected }: { onConnected: () => void | Promise<void> })
   const success = status.type === "success";
 
   return (
-    <div className="fixed inset-0 flex flex-col theme-bg theme-text">
+    <div className="w-screen min-h-screen flex flex-col theme-bg theme-text">
       <div className="flex-1 flex flex-col items-center justify-center px-8">
         <AspIcon />
 
@@ -85,22 +85,29 @@ function AspConfig({ onConnected }: { onConnected: () => void | Promise<void> })
             value={url}
             onChange={(e) => {
               setUrl(e.target.value);
-              if (status.type === "error") setStatus({ type: "idle" });
+              if (status.type === 'error') setStatus({ type: 'idle' });
             }}
             placeholder="https://arkade.computer/"
             disabled={connecting}
             className="w-full px-4 py-3 rounded-xl theme-card-elevated theme-text placeholder:opacity-20 border border-white/20 focus:border-lime-300 focus:outline-none transition-colors disabled:opacity-50"
           />
 
-          {status.type === "error" && (
-            <p className="mt-2 text-sm theme-danger" role="alert" aria-live="polite">{status.message}</p>
+          {status.type === 'error' && (
+            <p
+              className="mt-2 text-sm theme-danger"
+              role="alert"
+              aria-live="polite"
+            >
+              {status.message}
+            </p>
           )}
 
           {success && (
             <div className="mt-3 p-3 rounded-xl bg-lime-300/10 border border-lime-300/30">
               <p className="text-sm text-lime-300 font-medium">Connected</p>
               <p className="text-xs theme-text-muted mt-1">
-                Network: {status.info.network} &middot; Version: {status.info.version}
+                Network: {status.info.network} &middot; Version:{' '}
+                {status.info.version}
               </p>
             </div>
           )}
@@ -124,7 +131,9 @@ function AspConfig({ onConnected }: { onConnected: () => void | Promise<void> })
                   <LoadingSpinner />
                   Connecting...
                 </span>
-              ) : "Connect"}
+              ) : (
+                'Connect'
+              )}
             </button>
           )}
         </div>

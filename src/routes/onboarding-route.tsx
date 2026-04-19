@@ -18,13 +18,30 @@ type WalletChoice = "create" | "restore";
 
 function CreatingWalletScreen() {
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center theme-bg theme-text">
-      <svg className="mb-6 h-10 w-10 animate-spin text-lime-300" viewBox="0 0 24 24" fill="none">
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    <div className="w-screen min-h-screen flex flex-col items-center justify-center theme-bg theme-text">
+      <svg
+        className="mb-6 h-10 w-10 animate-spin text-lime-300"
+        viewBox="0 0 24 24"
+        fill="none"
+      >
+        <circle
+          className="opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          strokeWidth="4"
+        />
+        <path
+          className="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+        />
       </svg>
       <h1 className="mb-2 text-xl font-bold">Creating Your Wallet</h1>
-      <p className="text-sm theme-text-secondary">Generating keys and connecting to ASP...</p>
+      <p className="text-sm theme-text-secondary">
+        Generating keys and connecting to ASP...
+      </p>
     </div>
   );
 }

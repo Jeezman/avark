@@ -10,17 +10,26 @@ function SeedBackup({ mnemonic, onDone }: SeedBackupProps) {
   const words = mnemonic.split(" ");
 
   return (
-    <div className="fixed inset-0 flex flex-col theme-bg theme-text">
+    <div className="w-screen min-h-screen flex flex-col theme-bg theme-text">
       <div className="flex-1 flex flex-col items-center justify-center px-8">
         <div className="w-16 h-16 mb-6 rounded-2xl theme-card-elevated flex items-center justify-center">
-          <svg viewBox="0 0 24 24" className="w-8 h-8 text-lime-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            className="w-8 h-8 text-lime-300"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
           </svg>
         </div>
 
         <h1 className="text-2xl font-bold mb-2">Back Up Your Seed Phrase</h1>
         <p className="theme-text-secondary text-center mb-6 max-w-xs text-sm">
-          Write down these {words.length} words in order. They are the only way to recover your wallet.
+          Write down these {words.length} words in order. They are the only way
+          to recover your wallet.
         </p>
 
         {revealed ? (
@@ -30,7 +39,9 @@ function SeedBackup({ mnemonic, onDone }: SeedBackupProps) {
                 key={i}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg theme-card-elevated text-sm"
               >
-                <span className="theme-text-muted font-mono text-xs w-5 text-right">{i + 1}</span>
+                <span className="theme-text-muted font-mono text-xs w-5 text-right">
+                  {i + 1}
+                </span>
                 <span className="font-medium">{word}</span>
               </div>
             ))}
@@ -47,14 +58,15 @@ function SeedBackup({ mnemonic, onDone }: SeedBackupProps) {
         <div className="w-full max-w-sm space-y-3">
           {revealed && (
             <p className="text-amber-400/80 text-xs text-center">
-              Never share your seed phrase. Anyone with these words can steal your funds.
+              Never share your seed phrase. Anyone with these words can steal
+              your funds.
             </p>
           )}
           <button
             onClick={onDone}
             className="w-full py-4 rounded-2xl bg-lime-300 text-gray-900 text-lg font-bold shadow-lg active:scale-95 transition-transform"
           >
-            {revealed ? "I've Saved My Seed Phrase" : "Back Up Later"}
+            {revealed ? "I've Saved My Seed Phrase" : 'Back Up Later'}
           </button>
         </div>
       </div>

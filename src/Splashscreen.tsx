@@ -56,9 +56,10 @@ function Splashscreen({ onFinished }: { onFinished: () => void }) {
     };
   }, [onFinished]);
 
+
   return (
     <div
-      className={`fixed inset-0 z-9999 flex flex-col items-center justify-center bg-[#F7931A] overflow-hidden touch-none transition-opacity duration-400 ease-out ${fading ? "opacity-0 pointer-events-none" : "opacity-100"}`}
+      className={`w-screen min-h-screen flex flex-col items-center justify-center bg-[#F7931A] overflow-hidden touch-none transition-opacity duration-400 ease-out ${fading ? "opacity-0 pointer-events-none" : "opacity-100"}`}
     >
       <SplashLogo />
     </div>
