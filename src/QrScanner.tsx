@@ -8,67 +8,69 @@ interface QrScannerViewProps {
 
 function QrScannerView({ onScan, onClose }: QrScannerViewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const onScanRef = useRef(onScan);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    let stopped = false;
-    let stream: MediaStream | null = null;
-    let scanTimer: ReturnType<typeof setInterval> | null = null;
-
-    async function startCamera() {
+    let active = true;
+    let scanner: QrScanner | null = null;
+    const startPromise = Promise.resolve().then(async () => {
+      if (!active || !video) return;
+      const s = new QrScanner(
+        video,
+        (result) => {
+          if (result.data) onScanRef.current(result.data);
+        },
+        {
+          preferredCamera: 'environment',
+          highlightScanRegion: true,
+          highlightCodeOutline: true,
+          maxScansPerSecond: 15,
+          calculateScanRegion: (v) => ({
+            x: 0,
+            y: 0,
+            width: v.videoWidth || v.clientWidth,
+            height: v.videoHeight || v.clientHeight,
+          }),
+        },
+      );
+      s.setInversionMode('both');
       try {
-        // Request camera directly — avoids enumerateDevices() which
-        // returns empty on Android WebView until getUserMedia succeeds.
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-        });
-        if (stopped || !video) {
-          stream.getTracks().forEach((t) => t.stop());
+        await s.start();
+        if (!active) {
+          s.stop();
+          s.destroy();
           return;
         }
-        video.srcObject = stream;
-        await video.play();
-
-        // Scan frames periodically using qr-scanner's decoder
-        const v = video;
-        scanTimer = setInterval(async () => {
-          if (stopped || v.readyState < v.HAVE_ENOUGH_DATA) return;
-          try {
-            const result = await QrScanner.scanImage(v, {
-              returnDetailedScanResult: true,
-            });
-            if (result.data) {
-              onScan(result.data);
-            }
-          } catch {
-            // No QR code found in this frame — expected, keep scanning
-          }
-        }, 200);
+        scanner = s;
       } catch (err) {
-        if (!stopped) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : typeof err === 'string'
-                ? err
-                : 'Camera access denied',
-          );
-        }
+        s.destroy();
+        if (!active) return;
+        setError(
+          err instanceof Error
+            ? err.message
+            : typeof err === 'string'
+              ? err
+              : 'Camera access denied',
+        );
       }
-    }
-
-    void startCamera();
+    });
 
     return () => {
-      stopped = true;
-      if (scanTimer) clearInterval(scanTimer);
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      video.srcObject = null;
+      active = false;
+      void startPromise.then(() => {
+        scanner?.stop();
+        scanner?.destroy();
+      });
     };
-  }, [onScan]);
+  }, []);
 
   return (
     <div className="flex flex-col items-center gap-4">
@@ -84,7 +86,7 @@ function QrScannerView({ onScan, onClose }: QrScannerViewProps) {
         </div>
       ) : (
         <>
-          <div className="relative w-full max-w-[280px] aspect-square rounded-2xl overflow-hidden bg-black">
+          <div className="relative w-full aspect-square rounded-2xl overflow-hidden bg-black">
             <video
               ref={videoRef}
               className="w-full h-full object-cover"

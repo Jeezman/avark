@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import QRCode from 'react-qr-code';
 import { Drawer } from 'vaul';
 import { useLnInvoice } from './hooks/useLnInvoice';
+import { useKeyboardInset } from './hooks/useKeyboardInset';
 import { formatSats } from './utils/format';
 import { launchConfetti } from './utils/confetti';
 import { playSuccessSound, triggerHaptic } from './utils/receiveFeedback';
@@ -632,19 +633,22 @@ function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
 }
 
 function ReceiveSheet({ open, onOpenChange, onReceived }: ReceiveSheetProps) {
+  const kbInset = useKeyboardInset();
   const handleClose = useCallback(() => {
     onOpenChange(false);
     onReceived?.();
   }, [onOpenChange, onReceived]);
 
   return (
-    <Drawer.Root open={open} onOpenChange={onOpenChange}>
+    <Drawer.Root open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-40 bg-black/60" />
         <Drawer.Content
           className="fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-3xl theme-drawer px-6 pt-6 pb-8 outline-none"
           style={{
             height: 'calc(var(--app-height) * 0.85)',
+            maxHeight: kbInset > 0 ? `calc(100dvh - ${kbInset}px - 16px)` : undefined,
+            bottom: kbInset,
             paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 32px)',
           }}
         >
