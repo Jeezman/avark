@@ -1,5 +1,5 @@
 export function formatSats(sats: number): string {
-  return sats.toLocaleString();
+  return sats.toLocaleString("en-US");
 }
 
 export function formatDate(timestamp: number | null): string {

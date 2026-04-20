@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { router } from "./router";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
 import { PinLockProvider } from "./context/PinLockContext";
+import { FiatProvider } from "./context/FiatContext";
 import "./App.css";
 
 function AppInner() {
@@ -26,7 +27,9 @@ function AppInner() {
     <>
       <Toaster theme={theme} position="top-center" richColors style={{ top: "env(safe-area-inset-top, 0px)" }} />
       <PinLockProvider>
-        <RouterProvider router={router} />
+        <FiatProvider>
+          <RouterProvider router={router} />
+        </FiatProvider>
       </PinLockProvider>
     </>
   );

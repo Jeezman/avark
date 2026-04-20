@@ -6,6 +6,7 @@ import QRCode from 'react-qr-code';
 import { Drawer } from 'vaul';
 import { useLnInvoice } from './hooks/useLnInvoice';
 import { useKeyboardInset } from './hooks/useKeyboardInset';
+import { useSatsToFiat } from './context/FiatContext';
 import { formatSats } from './utils/format';
 import { launchConfetti } from './utils/confetti';
 import { playSuccessSound, triggerHaptic } from './utils/receiveFeedback';
@@ -407,6 +408,7 @@ function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
   const initialBoardingSat = useRef<number | null>(null);
 
   const amountSats = /^\d+$/.test(amountInput) ? Number(amountInput) : null;
+  const amountFiat = useSatsToFiat(amountSats ?? 0);
   const ln = useLnInvoice();
 
   const lnInvoiceForQr =
@@ -595,9 +597,18 @@ function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
               <span className="text-xs theme-text-muted">sats</span>
             </div>
             {amountSats !== null && amountSats > 0 && (
-              <p className="text-[10px] theme-text-faint mt-1 text-right">
-                {amountSats.toLocaleString()} sats = {satsToBtc(amountSats)} BTC
-              </p>
+              <div className="mt-1 flex justify-between gap-2">
+                {amountFiat ? (
+                  <p className="text-[10px] theme-text-muted tabular-nums">
+                    ≈ {amountFiat}
+                  </p>
+                ) : (
+                  <span />
+                )}
+                <p className="text-[10px] theme-text-faint text-right">
+                  {formatSats(amountSats)} sats = {satsToBtc(amountSats)} BTC
+                </p>
+              </div>
             )}
           </div>
 

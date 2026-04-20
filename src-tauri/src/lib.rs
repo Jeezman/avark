@@ -38,6 +38,10 @@ pub(crate) struct Settings {
     pub(crate) max_pin_attempts: Option<u32>,
     #[serde(default)]
     pub(crate) pin_failed_attempts: Option<u32>,
+    #[serde(default)]
+    pub(crate) fiat_enabled: Option<bool>,
+    #[serde(default)]
+    pub(crate) fiat_currency: Option<String>,
 }
 
 pub(crate) struct AppWalletState {
@@ -247,6 +251,8 @@ pub fn run() {
             commands::settings::settings,
             commands::settings::set_theme,
             commands::settings::set_esplora_url,
+            commands::settings::set_fiat_enabled,
+            commands::settings::set_fiat_currency,
             // Wallet lifecycle
             commands::wallet::has_wallet,
             commands::wallet::create_wallet,

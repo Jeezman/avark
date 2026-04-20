@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import { Drawer } from 'vaul';
 import QrScannerView from './QrScanner';
 import { useKeyboardInset } from './hooks/useKeyboardInset';
+import { useSatsToFiat } from './context/FiatContext';
+import { formatSats } from './utils/format';
 
 interface SendSheetProps {
   open: boolean;
@@ -55,6 +57,7 @@ function SendSheetContent({
   const [txid, setTxid] = useState<string | null>(null);
 
   const amountSats = /^\d+$/.test(amountInput) ? Number(amountInput) : null;
+  const amountFiat = useSatsToFiat(amountSats ?? 0);
   const detectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feeAbortRef = useRef<AbortController | null>(null);
 
@@ -407,12 +410,17 @@ function SendSheetContent({
           </div>
           <div className="flex justify-between mt-1">
             <p className="text-[10px] theme-text-faint">
-              Available: {offchainBalanceSat.toLocaleString()} sats
+              Available: {formatSats(offchainBalanceSat)} sats
             </p>
             {amountSats !== null && amountSats > offchainBalanceSat && (
               <p className="text-[10px] theme-danger">Insufficient funds</p>
             )}
           </div>
+          {amountSats !== null && amountSats > 0 && amountFiat && (
+            <p className="text-[10px] theme-text-muted mt-0.5 tabular-nums">
+              ≈ {amountFiat}
+            </p>
+          )}
           <button
             onClick={() => {
               setAmountInput(String(offchainBalanceSat));
@@ -439,7 +447,7 @@ function SendSheetContent({
               )}
               {fee && (
                 <p className="text-xs theme-text-secondary">
-                  {fee.fee_sat.toLocaleString()} sats
+                  {formatSats(fee.fee_sat)} sats
                 </p>
               )}
               {feeError && (
@@ -491,7 +499,7 @@ function SendSheetContent({
           <div className="flex justify-between">
             <span className="text-xs theme-text-muted">Amount</span>
             <span className="text-xs theme-text font-medium">
-              {amountSats?.toLocaleString()} sats
+              {amountSats != null ? formatSats(amountSats) : ''} sats
             </span>
           </div>
           {fee && addressType === 'bitcoin' && (
@@ -499,13 +507,13 @@ function SendSheetContent({
               <div className="flex justify-between">
                 <span className="text-xs theme-text-muted">Fee</span>
                 <span className="text-xs theme-text-secondary">
-                  {fee.fee_sat.toLocaleString()} sats
+                  {formatSats(fee.fee_sat)} sats
                 </span>
               </div>
               <div className="border-t theme-border pt-2 flex justify-between">
                 <span className="text-xs theme-text-muted">Total</span>
                 <span className="text-xs theme-text font-medium">
-                  {((amountSats ?? 0) + fee.fee_sat).toLocaleString()} sats
+                  {formatSats((amountSats ?? 0) + fee.fee_sat)} sats
                 </span>
               </div>
             </>
@@ -583,7 +591,7 @@ function SendSheetContent({
         </div>
         <p className="text-lg font-bold theme-text mb-1">Sent!</p>
         <p className="text-sm theme-text-muted mb-4">
-          {amountSats?.toLocaleString()} sats{' '}
+          {amountSats != null ? formatSats(amountSats) : ''} sats{' '}
           {addressType === 'ark'
             ? 'via Ark'
             : addressType === 'bitcoin'
