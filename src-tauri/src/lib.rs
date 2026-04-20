@@ -287,6 +287,8 @@ pub fn run() {
             commands::wallet::verify_mnemonic,
             // Splash
             commands::splash::splash_ready,
+            // Share
+            commands::share::share_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

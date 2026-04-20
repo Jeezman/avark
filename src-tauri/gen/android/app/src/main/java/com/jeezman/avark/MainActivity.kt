@@ -1,5 +1,6 @@
 package com.jeezman.avark
 
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -23,9 +24,32 @@ class MainActivity : TauriActivity() {
         // happens to be on.
         private val keepSplash = AtomicBoolean(true)
 
+        // Weak reference to the running Activity so JNI helpers (which run
+        // off the UI thread) can post back to it.
+        @Volatile
+        private var instance: MainActivity? = null
+
         @JvmStatic
         fun dismissSplash() {
             keepSplash.set(false)
+        }
+
+        /**
+         * Launch the system share sheet with `text`. Android WebView doesn't
+         * expose `navigator.share`, so the frontend falls through to a Tauri
+         * command that calls into here via JNI. Must be dispatched to the UI
+         * thread because startActivity requires it.
+         */
+        @JvmStatic
+        fun shareText(text: String) {
+            val activity = instance ?: return
+            activity.runOnUiThread {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, text)
+                }
+                activity.startActivity(Intent.createChooser(intent, null))
+            }
         }
     }
 
@@ -41,7 +65,13 @@ class MainActivity : TauriActivity() {
             SPLASH_FAILSAFE_MS,
         )
 
+        instance = this
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
     }
 }

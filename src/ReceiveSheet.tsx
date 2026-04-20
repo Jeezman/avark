@@ -80,30 +80,69 @@ function CopyRow({
     }
   }, [label, value]);
 
+  const handleShare = useCallback(async () => {
+    // iOS WKWebView exposes navigator.share; Android WebView does not, so we
+    // fall back to a Tauri command that fires an ACTION_SEND intent.
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: label, text: value });
+        return;
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+      }
+    }
+    try {
+      await invoke('share_text', { text: value });
+    } catch {
+      toast.error('Failed to share');
+    }
+  }, [label, value]);
+
   return (
-    <button
-      onClick={handleCopy}
-      className="flex w-full items-center justify-between gap-3 rounded-xl theme-card px-4 py-2.5 transition-colors text-left"
-    >
-      <div className="min-w-0">
-        <p className="text-[10px] theme-text-muted mb-0.5">{label}</p>
-        <p className="font-mono text-xs theme-text-secondary truncate">
-          {truncated ?? truncateMiddle(value)}
-        </p>
-      </div>
-      <svg
-        className="h-4 w-4 shrink-0 theme-text-faint"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+    <div className="flex w-full items-center gap-2 rounded-xl theme-card px-4 py-2.5">
+      <button
+        onClick={handleCopy}
+        className="flex flex-1 min-w-0 items-center justify-between gap-3 text-left"
       >
-        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-      </svg>
-    </button>
+        <div className="min-w-0">
+          <p className="text-[10px] theme-text-muted mb-0.5">{label}</p>
+          <p className="font-mono text-xs theme-text-secondary truncate">
+            {truncated ?? truncateMiddle(value)}
+          </p>
+        </div>
+        <svg
+          className="h-4 w-4 shrink-0 theme-text-faint"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+        </svg>
+      </button>
+      <button
+        onClick={handleShare}
+        aria-label={`Share ${label}`}
+        className="shrink-0 p-1 theme-text-faint hover:theme-text-muted transition-colors"
+      >
+        <svg
+          className="h-4 w-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 3v12" />
+          <path d="M8 7l4-4 4 4" />
+          <path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -563,7 +602,19 @@ function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="rounded-2xl bg-white p-4 mb-4">
-            <QRCode value={qrValue} size={200} level="M" />
+            {/*
+              Lightning invoices push this QR to ~70+ modules per side. Keep
+              the module size printable by rendering large and letting it
+              scale down — 320px at level "L" (7% EC, standard for BOLT11)
+              gives each module ≥4px on-screen and stays scannable from
+              another device's camera.
+            */}
+            <QRCode
+              value={qrValue}
+              size={320}
+              level="L"
+              style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
+            />
           </div>
 
           <div className="w-full space-y-2">

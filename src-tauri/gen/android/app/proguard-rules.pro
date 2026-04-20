@@ -23,3 +23,9 @@
 # Suppress warnings from Google Tink (used by androidx.security:security-crypto)
 -dontwarn javax.annotation.Nullable
 -dontwarn javax.annotation.concurrent.GuardedBy
+
+# Keep MainActivity intact — its `dismissSplash` companion method is invoked
+# from Rust over JNI (see src-tauri/src/commands/splash.rs). ProGuard can't
+# see JNI call sites, so without this it gets shrunk and the JNI lookup
+# throws NoSuchMethodError on launch.
+-keep class com.jeezman.avark.MainActivity { *; }

@@ -83,6 +83,8 @@ pnpm tauri ios dev
 pnpm tauri ios build
 ```
 
+`tauri.conf.json` pins `bundle.iOS.developmentTeam` to the maintainer's Apple Team ID. If you're building iOS under a different Apple Developer account, override it locally — either edit that field to your own Team ID (don't commit), or set `DEVELOPMENT_TEAM` via an `.xcconfig` / Xcode's Signing & Capabilities tab before building.
+
 ## Other Commands
 
 ```bash
