@@ -5,6 +5,7 @@ import { Link } from '@tanstack/react-router';
 import ReceiveSheet from '../ReceiveSheet';
 import SendSheet from '../SendSheet';
 import { useWallet } from '../context/WalletContext';
+import { useSatsToFiat } from '../context/FiatContext';
 import { formatSats } from '../utils/format';
 import { TransactionRow } from '../components/TransactionRow';
 import { NextRoundCountdown } from '../components/NextRoundCountdown';
@@ -32,6 +33,7 @@ export function DashboardRoute() {
     (balance?.onchain_confirmed_sat ?? 0) +
     (balance?.onchain_pending_sat ?? 0) +
     (balance?.offchain_total_sat ?? 0);
+  const totalFiat = useSatsToFiat(totalSat);
 
   return (
     <main
@@ -82,6 +84,11 @@ export function DashboardRoute() {
           {formatSats(totalSat)}{' '}
           <span className="text-lg theme-text-muted">sats</span>
         </p>
+        {totalFiat && (
+          <p className="mt-1 text-sm theme-text-muted tabular-nums">
+            ≈ {totalFiat}
+          </p>
+        )}
       </div>
 
       <div className="flex justify-center gap-3 px-6 pb-6">

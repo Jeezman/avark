@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import type { VtxoInfo } from "../components/VtxoCard";
+import { formatSats } from "../utils/format";
 
 export type ConnectionState =
   | "checking"
@@ -241,7 +242,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const unlisteners = [
       listen<{ amount_sat: number }>("payment-received", (event) => {
         toast.success(
-          `Received ${event.payload.amount_sat.toLocaleString()} sats`,
+          `Received ${formatSats(event.payload.amount_sat)} sats`,
         );
         setTimeout(() => void fetchData(), 1500);
       }),

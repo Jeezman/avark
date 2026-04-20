@@ -187,6 +187,22 @@
   top: env(safe-area-inset-top, 0px) !important;
 }
 
+/* Shimmer skeleton — used by the fiat ticker while a new quote is in-flight */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.shimmer-skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-bg-card-hover) 0%,
+    var(--color-border) 50%,
+    var(--color-bg-card-hover) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
 /* PIN shake animation */
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
