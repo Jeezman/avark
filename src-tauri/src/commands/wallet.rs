@@ -812,6 +812,41 @@ pub async fn settle(app: tauri::AppHandle) -> Result<SettleResult, AppError> {
 }
 
 #[derive(Serialize)]
+pub struct RoundSchedule {
+    /// Unix timestamp (seconds) of the next round start. Only populated when
+    /// the ASP publishes a `scheduled_session`; otherwise `None` and the UI
+    /// falls back to showing `session_duration` as a static cadence.
+    next_start_time: Option<i64>,
+    /// How long a round stays open, in seconds. Always populated from the
+    /// ASP's `Info.session_duration`.
+    session_duration: u64,
+}
+
+/// Return the ASP's round schedule so the UI can show a countdown when
+/// possible, or at least a static cadence.
+#[tauri::command]
+pub async fn get_round_schedule(app: tauri::AppHandle) -> Result<RoundSchedule, AppError> {
+    let asp_url = read_wallet_data(&app).await?.asp_url;
+    let mut grpc = ark_grpc::Client::new(asp_url);
+    // Single timeout covers connect + get_info so the UI call can't exceed 10s
+    let info = tokio::time::timeout(Duration::from_secs(10), async {
+        grpc.connect()
+            .await
+            .map_err(|e| AppError::Asp(format!("Connection failed: {e}")))?;
+        grpc.get_info()
+            .await
+            .map_err(|e| AppError::Asp(format!("Failed to get server info: {e}")))
+    })
+    .await
+    .map_err(|_| AppError::Asp("Server info request timed out".into()))??;
+
+    Ok(RoundSchedule {
+        next_start_time: info.scheduled_session.map(|s| s.next_start_time),
+        session_duration: info.session_duration,
+    })
+}
+
+#[derive(Serialize)]
 pub struct ReceiveAddresses {
     ark_address: String,
     boarding_address: String,

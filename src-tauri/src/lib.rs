@@ -289,6 +289,8 @@ pub fn run() {
             commands::splash::splash_ready,
             // Share
             commands::share::share_text,
+            // Round schedule
+            commands::wallet::get_round_schedule,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -7,6 +7,7 @@ import SendSheet from '../SendSheet';
 import { useWallet } from '../context/WalletContext';
 import { formatSats } from '../utils/format';
 import { TransactionRow } from '../components/TransactionRow';
+import { NextRoundCountdown } from '../components/NextRoundCountdown';
 
 interface SettleResult {
   settled: boolean;
@@ -123,15 +124,10 @@ export function DashboardRoute() {
       {/* Balance Breakdown */}
       <div className="mx-6 grid grid-cols-2 gap-3 mb-6">
         <div className="rounded-2xl theme-card p-4">
-          <p className="text-xs theme-text-muted mb-1">Onchain</p>
+          <p className="text-xs theme-text-muted mb-1">Boarding</p>
           <p className="text-lg font-semibold tabular-nums">
-            {formatSats(balance?.onchain_confirmed_sat ?? 0)}
+            {formatSats(balance?.boarding_sat ?? 0)}
           </p>
-          {(balance?.onchain_pending_sat ?? 0) > 0 && (
-            <p className="text-xs theme-warning mt-0.5">
-              +{formatSats(balance!.onchain_pending_sat)} pending
-            </p>
-          )}
           {(balance?.boarding_sat ?? 0) > 0 && (
             <button
               disabled={settling}
@@ -153,11 +149,23 @@ export function DashboardRoute() {
               }}
               className="text-xs theme-accent mt-1 hover:underline disabled:opacity-50"
             >
-              {settling
-                ? 'Settling...'
-                : `+${formatSats(balance!.boarding_sat)} boarding — Tap to settle`}
+              {settling ? 'Settling...' : 'Tap to settle'}
             </button>
           )}
+          {(() => {
+            const onchainTotal =
+              (balance?.onchain_confirmed_sat ?? 0) +
+              (balance?.onchain_pending_sat ?? 0);
+            if (onchainTotal === 0) return null;
+            // Only shows up for Ark-internal recovery paths (unilateral exit,
+            // swept expired boarding UTXOs) — never from a user-visible deposit.
+            return (
+              <p className="text-xs theme-text-muted mt-1">
+                +{formatSats(onchainTotal)} onchain (recovery)
+              </p>
+            );
+          })()}
+          <NextRoundCountdown />
         </div>
         <div className="rounded-2xl theme-card p-4">
           <p className="text-xs theme-text-muted mb-1">Offchain (Ark)</p>
