@@ -103,18 +103,18 @@ fn is_successful_terminal(status: &str) -> bool {
 /// Search HD key indices to find and cache the claim key for a swap.
 /// This is needed because the Bip32KeyProvider's index resets on app restart.
 ///
-/// `swap_count` is the total number of reverse swaps in the DB — the exact
-/// upper bound of indices that could have been derived. A small buffer is added
-/// in case a swap was created but the DB write was lost.
+/// The key provider's index is shared with wallet receive-address derivation
+/// (`get_offchain_address`), so the number of reverse swaps is *not* an upper
+/// bound on which index a given claim key sits at — viewing the Receive screen
+/// advances the counter without creating a swap. We search a generous range
+/// since HD derivation is fast.
 fn discover_swap_claim_key(
     key_provider: &ark_client::Bip32KeyProvider,
     claim_pk: &bitcoin::XOnlyPublicKey,
-    swap_count: u32,
 ) -> Result<(), AppError> {
     use ark_client::KeyProvider;
-    // Add a small buffer for edge cases (e.g. swap created but DB row lost).
-    let limit = swap_count.saturating_add(20);
-    for i in 0..limit {
+    const MAX_DISCOVERY_INDEX: u32 = 50_000;
+    for i in 0..MAX_DISCOVERY_INDEX {
         if let Some(kp) = key_provider
             .derive_at_discovery_index(i)
             .map_err(|e| AppError::Wallet(format!("Key derivation failed: {e}")))?
@@ -129,7 +129,7 @@ fn discover_swap_claim_key(
         }
     }
     Err(AppError::Wallet(format!(
-        "Public key {} not found in HD wallet. Searched indices 0..{limit}",
+        "Public key {} not found in HD wallet. Searched indices 0..{MAX_DISCOVERY_INDEX}",
         claim_pk
     )))
 }
@@ -157,8 +157,6 @@ pub(crate) fn spawn_pending_swap_recovery(
                 return;
             }
         };
-
-        let swap_count = pending.len() as u32;
 
         for swap in pending {
             // Check cancellation between each swap.
@@ -208,7 +206,7 @@ pub(crate) fn spawn_pending_swap_recovery(
 
             // Ensure the HD key provider can find the claim key for this swap.
             let claim_pk = swap.claim_public_key.inner.x_only_public_key().0;
-            if let Err(e) = discover_swap_claim_key(&key_provider, &claim_pk, swap_count) {
+            if let Err(e) = discover_swap_claim_key(&key_provider, &claim_pk) {
                 warn!(swap_id = %swap_id, error = %e, "swap recovery: could not find claim key");
                 continue;
             }
@@ -458,7 +456,7 @@ pub async fn debug_list_swaps(app: tauri::AppHandle) -> Result<Vec<SwapRecord>, 
 }
 
 #[tauri::command]
-pub async fn debug_claim_swap(app: tauri::AppHandle, swap_id: String) -> Result<String, AppError> {
+pub async fn retry_claim_swap(app: tauri::AppHandle, swap_id: String) -> Result<String, AppError> {
     let _ = app.emit("ln-swap-progress", format!("[{swap_id}] Starting claim..."));
 
     let (client, swap_storage, key_provider) = {
@@ -489,12 +487,7 @@ pub async fn debug_claim_swap(app: tauri::AppHandle, swap_id: String) -> Result<
         "ln-swap-progress",
         format!("[{swap_id}] Discovering claim key..."),
     );
-    let swap_count = swap_storage
-        .list_all_reverse()
-        .await
-        .map(|v| v.len() as u32)
-        .unwrap_or(0);
-    discover_swap_claim_key(&key_provider, &claim_pk, swap_count)?;
+    discover_swap_claim_key(&key_provider, &claim_pk)?;
 
     let _ = app.emit(
         "ln-swap-progress",

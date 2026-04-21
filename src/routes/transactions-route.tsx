@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useWallet } from "../context/WalletContext";
 import type { TransactionRecord, SwapRecord } from "../context/WalletContext";
@@ -16,6 +17,7 @@ interface UnifiedTx {
   created_at: number | null;
   status: "confirmed" | "pending" | "failed";
   statusLabel: string | null;
+  canRetryClaim: boolean;
 }
 
 function txToUnified(tx: TransactionRecord, index: number): UnifiedTx {
@@ -30,6 +32,7 @@ function txToUnified(tx: TransactionRecord, index: number): UnifiedTx {
     created_at: tx.created_at,
     status: tx.is_settled === false ? "pending" : "confirmed",
     statusLabel: tx.is_settled === false ? "Pending" : null,
+    canRetryClaim: false,
   };
 }
 
@@ -51,6 +54,7 @@ function swapToUnified(swap: SwapRecord): UnifiedTx {
         ? "failed"
         : "pending",
     statusLabel: swap.is_terminal ? null : shortStatus,
+    canRetryClaim: !swap.is_terminal && swap.has_preimage,
   };
 }
 
@@ -67,6 +71,7 @@ export function TransactionsRoute() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(20);
+  const [retryingSwapId, setRetryingSwapId] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -213,7 +218,7 @@ export function TransactionsRoute() {
                     </p>
                   </div>
                   {isExpanded && (
-                    <div className="mt-2 pt-2 border-t theme-border">
+                    <div className="mt-2 pt-2 border-t theme-border space-y-2">
                       <div className="flex items-center gap-2">
                         <p className="text-[10px] theme-text-faint font-mono break-all flex-1">{tx.rawId}</p>
                         <button
@@ -231,6 +236,36 @@ export function TransactionsRoute() {
                           Copy
                         </button>
                       </div>
+                      {tx.canRetryClaim && (
+                        <button
+                          disabled={retryingSwapId === tx.rawId}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setRetryingSwapId(tx.rawId);
+                            try {
+                              const result = await invoke<string>(
+                                "retry_claim_swap",
+                                { swapId: tx.rawId },
+                              );
+                              toast.success(result);
+                              void fetchData();
+                            } catch (err) {
+                              toast.error(
+                                typeof err === "string"
+                                  ? err
+                                  : "Retry claim failed",
+                              );
+                            } finally {
+                              setRetryingSwapId(null);
+                            }
+                          }}
+                          className="w-full rounded-lg bg-lime-300 px-3 py-1.5 text-xs font-bold text-gray-900 active:scale-95 transition-transform disabled:opacity-50"
+                        >
+                          {retryingSwapId === tx.rawId
+                            ? "Retrying claim…"
+                            : "Retry claim"}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

@@ -274,7 +274,7 @@ pub fn run() {
             // Lightning / swaps
             commands::lightning::get_ln_invoice,
             commands::lightning::debug_list_swaps,
-            commands::lightning::debug_claim_swap,
+            commands::lightning::retry_claim_swap,
             // Receive subscription
             commands::receive::start_receive_subscription,
             commands::receive::stop_receive_subscription,

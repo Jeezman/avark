@@ -61,7 +61,7 @@ export function LightningSwaps({ swaps, onClaimed }: LightningSwapsProps) {
                         setClaimingId(swap.id);
                         try {
                           const result = await invoke<string>(
-                            'debug_claim_swap',
+                            'retry_claim_swap',
                             { swapId: swap.id },
                           );
                           toast.success(result);
