@@ -29,3 +29,14 @@ NOTES.md
 src-tauri/.cargo/config.toml
 src-tauri/.ndk-shims/aarch64-linux-android-ranlib
 docs/*
+!docs/VERIFYING.md
+!docs/release-signing-key.asc
+
+# Signing material — never commit. CI reads these from GitHub Secrets instead.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.p8
+*.mobileprovision
+keystore.properties

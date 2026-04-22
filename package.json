@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "android-dev-icons": "node scripts/build-android-dev-icons.mjs",
     "dev:android": "node scripts/android-dev.mjs",
+    "version:bump": "node scripts/version-bump.mjs",
     "prepare": "git config --local core.hooksPath githooks 2>/dev/null || true"
   },
   "dependencies": {

@@ -2,6 +2,28 @@
 
 A Bitcoin wallet for [Arkade](https://docs.arkadeos.com/) built with Tauri 2 (React + TypeScript frontend, Rust backend).
 
+## Installing
+
+Signed, reproducible builds are published on the [Releases page](https://github.com/Jeezman/avark/releases). Each release includes:
+
+- `avark-<version>-android-arm64-v8a.apk` — modern 64-bit phones (most users).
+- `avark-<version>-android-armeabi-v7a.apk` — older / budget 32-bit phones (many Tecno, Infinix, itel, entry-level Samsung).
+- `SHA256SUMS` + `SHA256SUMS.asc` — checksums and a GPG signature over them, made by the Avark release key.
+
+See [`docs/VERIFYING.md`](docs/VERIFYING.md) if you're unsure which APK to pick (TL;DR: `arm64-v8a` unless your phone refuses it).
+
+iOS builds are not yet published — track [#iOS-release](https://github.com/Jeezman/avark/issues) if you want it. For now, iOS users can build locally with `pnpm tauri ios build`.
+
+**Before you install, verify.** This is a Bitcoin wallet — users who can't verify shouldn't be trusting it with their sats. See [`docs/VERIFYING.md`](docs/VERIFYING.md) for the full process. TL;DR:
+
+```bash
+gpg --import docs/release-signing-key.asc
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum -c SHA256SUMS
+```
+
+If any check fails, **do not install the binary** — open an issue.
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) (v20.19+ or v22.12+)

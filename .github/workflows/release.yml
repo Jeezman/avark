@@ -1,0 +1,298 @@
+# Third-party actions are pinned to full commit SHAs, not tags. This workflow
+# handles the Android signing keystore and the GPG private key from Secrets;
+# a compromised/retagged action would get both. When updating an action,
+# resolve the new SHA with `git ls-remote https://github.com/<owner>/<repo>
+# refs/tags/<tag>` and keep the trailing `# <tag>` comment so the intended
+# version is still readable at a glance.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (must already exist in the repo, e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+# A release build takes ~30 min — don't cancel an in-flight run if another is
+# dispatched, but also don't let two runs for the same tag fight each other.
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve tag + check version consistency
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.r.outputs.tag }}
+      version: ${{ steps.r.outputs.version }}
+    steps:
+      - id: r
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          case "$TAG" in
+            v*) : ;;
+            *)  echo "::error::tag '$TAG' must start with 'v'"; exit 1 ;;
+          esac
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"       >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ steps.r.outputs.tag }}
+
+      - name: Verify all version fields match the tag
+        run: |
+          VERSION='${{ steps.r.outputs.version }}'
+          fail=0
+          check() {
+            local file="$1" actual="$2"
+            if [ "$actual" != "$VERSION" ]; then
+              echo "::error file=$file::expected $VERSION, found '$actual'"
+              fail=1
+            fi
+          }
+          check package.json                             "$(jq -r .version package.json)"
+          check src-tauri/tauri.conf.json                "$(jq -r .version src-tauri/tauri.conf.json)"
+          check src-tauri/Cargo.toml                     "$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          check src-tauri/gen/android/app/tauri.properties "$(grep '^tauri.android.versionName=' src-tauri/gen/android/app/tauri.properties | cut -d= -f2)"
+          exit $fail
+
+  android:
+    name: Build signed Android APK + AAB
+    runs-on: ubuntu-latest
+    needs: resolve
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: ""
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;26.1.10909125"
+          NDK="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
+          {
+            echo "NDK_HOME=$NDK"
+            echo "ANDROID_NDK_HOME=$NDK"
+            echo "ANDROID_NDK_ROOT=$NDK"
+          } >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: src-tauri
+
+      - name: Export NDK toolchain env for cargo cross-compilation
+        run: |
+          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          {
+            echo "AR_aarch64_linux_android=$NDK_BIN/llvm-ar"
+            echo "RANLIB_aarch64_linux_android=$NDK_BIN/llvm-ranlib"
+            echo "CC_aarch64_linux_android=$NDK_BIN/aarch64-linux-android24-clang"
+            echo "CXX_aarch64_linux_android=$NDK_BIN/aarch64-linux-android24-clang++"
+
+            echo "AR_armv7_linux_androideabi=$NDK_BIN/llvm-ar"
+            echo "RANLIB_armv7_linux_androideabi=$NDK_BIN/llvm-ranlib"
+            echo "CC_armv7_linux_androideabi=$NDK_BIN/armv7a-linux-androideabi24-clang"
+            echo "CXX_armv7_linux_androideabi=$NDK_BIN/armv7a-linux-androideabi24-clang++"
+
+            echo "AR_i686_linux_android=$NDK_BIN/llvm-ar"
+            echo "RANLIB_i686_linux_android=$NDK_BIN/llvm-ranlib"
+            echo "CC_i686_linux_android=$NDK_BIN/i686-linux-android24-clang"
+            echo "CXX_i686_linux_android=$NDK_BIN/i686-linux-android24-clang++"
+
+            echo "AR_x86_64_linux_android=$NDK_BIN/llvm-ar"
+            echo "RANLIB_x86_64_linux_android=$NDK_BIN/llvm-ranlib"
+            echo "CC_x86_64_linux_android=$NDK_BIN/x86_64-linux-android24-clang"
+            echo "CXX_x86_64_linux_android=$NDK_BIN/x86_64-linux-android24-clang++"
+          } >> "$GITHUB_ENV"
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Write release keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PW:  ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS:    ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PW:       ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd src-tauri/gen/android
+          echo "$KEYSTORE_B64" | base64 -d > avark-release.jks
+          # build.gradle.kts reads these via rootProject.file("keystore.properties")
+          cat > keystore.properties <<EOF
+          storeFile=app/avark-release.jks
+          storePassword=$KEYSTORE_PW
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PW
+          EOF
+          # storeFile path is rootProject-relative, so drop the jks inside app/
+          mv avark-release.jks app/avark-release.jks
+
+      - name: Build signed APK
+        run: pnpm tauri android build --apk -- --features vendored-openssl
+
+      - name: Verify signatures on every output APK
+        run: |
+          BT=$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)
+          mapfile -t APKS < <(find src-tauri/gen/android/app/build/outputs/apk \
+            -name "*-release.apk" ! -name "*-unsigned*")
+          if [ "${#APKS[@]}" -eq 0 ]; then
+            echo "::error::no signed APKs found in build outputs"
+            find src-tauri/gen/android/app/build/outputs/apk -type f
+            exit 1
+          fi
+          for APK in "${APKS[@]}"; do
+            echo "==== $APK ===="
+            "$ANDROID_SDK_ROOT/build-tools/$BT/apksigner" verify --verbose "$APK"
+            "$ANDROID_SDK_ROOT/build-tools/$BT/apksigner" verify --print-certs "$APK"
+          done
+
+      - name: Stage per-ABI release artifacts
+        run: |
+          V='${{ needs.resolve.outputs.version }}'
+          mkdir -p artifacts
+          mapfile -t APKS < <(find src-tauri/gen/android/app/build/outputs/apk \
+            -name "*-release.apk" ! -name "*-unsigned*")
+          for APK in "${APKS[@]}"; do
+            case "$APK" in
+              *arm64-v8a*)     cp "$APK" "artifacts/avark-$V-android-arm64-v8a.apk" ;;
+              *armeabi-v7a*)   cp "$APK" "artifacts/avark-$V-android-armeabi-v7a.apk" ;;
+              *) echo "::warning::unexpected output APK (ignored): $APK" ;;
+            esac
+          done
+          # Both ABIs are required — fail loud if gradle's splits config drifted.
+          test -f "artifacts/avark-$V-android-arm64-v8a.apk"
+          test -f "artifacts/avark-$V-android-armeabi-v7a.apk"
+          ls -la artifacts
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android
+          path: artifacts/*
+          if-no-files-found: error
+          # 14 days of runway between the android build and final publish.
+          retention-days: 14
+
+      - name: Clean up signing material
+        if: always()
+        run: |
+          rm -f src-tauri/gen/android/app/avark-release.jks \
+                src-tauri/gen/android/keystore.properties
+
+  publish:
+    name: Publish draft GitHub Release
+    runs-on: ubuntu-latest
+    needs: [resolve, android]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: downloaded
+
+      - name: Stage files for release
+        run: |
+          mkdir -p release
+          cp downloaded/android/* release/
+          ls -la release
+
+      - name: Compute SHA256SUMS
+        working-directory: release
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Import GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          # Append only if the directive isn't already set — `>` would clobber
+          # any pre-existing config on a self-hosted or cache-restored runner.
+          # On a fresh hosted runner the files don't exist yet, so append
+          # creates them.
+          grep -qxF 'allow-loopback-pinentry' ~/.gnupg/gpg-agent.conf 2>/dev/null \
+            || echo 'allow-loopback-pinentry' >> ~/.gnupg/gpg-agent.conf
+          grep -qxF 'pinentry-mode loopback' ~/.gnupg/gpg.conf 2>/dev/null \
+            || echo 'pinentry-mode loopback' >> ~/.gnupg/gpg.conf
+          # Kill any agent that might already be running with a different
+          # config. Unlikely on a fresh hosted runner, but cheap insurance —
+          # ensures the import reads the loopback config we just wrote.
+          gpgconf --kill gpg-agent || true
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          # Clean up after import so secret-key material isn't held in agent
+          # memory across subsequent steps.
+          gpgconf --kill gpg-agent
+
+      - name: Sign SHA256SUMS
+        working-directory: release
+        env:
+          GPG_KEY_ID:    ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$GPG_PASSPHRASE" \
+              --local-user "$GPG_KEY_ID" \
+              --detach-sign --armor \
+              --output SHA256SUMS.asc SHA256SUMS
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+
+      - name: Create/update draft release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name:               ${{ needs.resolve.outputs.tag }}
+          name:                   ${{ needs.resolve.outputs.tag }}
+          draft:                  true
+          generate_release_notes: true
+          files:                  release/*
+          body: |
+            ## Verifying this release
+
+            ```bash
+            # 1. Import the Avark release signing key
+            gpg --import docs/release-signing-key.asc
+
+            # 2. Verify the checksum file signature
+            gpg --verify SHA256SUMS.asc SHA256SUMS
+
+            # 3. Verify each artifact matches its expected checksum
+            sha256sum -c SHA256SUMS
+            ```
+
+            See [`docs/VERIFYING.md`](https://github.com/${{ github.repository }}/blob/${{ needs.resolve.outputs.tag }}/docs/VERIFYING.md) for the full process and the signing key fingerprint.

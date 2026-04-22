@@ -1,3 +1,7 @@
+# Third-party actions are pinned to full commit SHAs, not tags — same policy
+# as release.yml. Resolve new SHAs with `git ls-remote https://github.com/
+# <owner>/<repo> refs/tags/<tag>` and keep the trailing `# <tag>` comment.
+
 name: CI
 
 on:
@@ -14,13 +18,13 @@ jobs:
     name: Frontend (tsc + lint)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: pnpm
@@ -41,7 +45,7 @@ jobs:
       run:
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # Tauri 2's build script pulls these in via pkg-config even for
       # `cargo check` / `clippy` / `test`, so they're required on Linux
@@ -60,11 +64,11 @@ jobs:
             wget \
             file
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: src-tauri
 
