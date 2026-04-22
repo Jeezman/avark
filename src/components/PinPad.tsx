@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface PinPadProps {
   title: string;
@@ -13,18 +13,23 @@ interface PinPadProps {
 export function PinPad({ title, subtitle, error, onComplete, attemptsRemaining, maxAttempts, disabled }: PinPadProps) {
   const [digits, setDigits] = useState<string[]>([]);
   const [shaking, setShaking] = useState(false);
-  const prevError = useRef(error);
+  const [prevError, setPrevError] = useState(error);
 
-  // Trigger shake on new error
-  useEffect(() => {
-    if (error && error !== prevError.current) {
+  // Trigger shake on new error 
+  if (error !== prevError) {
+    setPrevError(error);
+    if (error) {
       setShaking(true);
       setDigits([]);
-      const t = setTimeout(() => setShaking(false), 500);
-      return () => clearTimeout(t);
     }
-    prevError.current = error;
-  }, [error]);
+  }
+
+  // Clear shake 500ms after it starts
+  useEffect(() => {
+    if (!shaking) return;
+    const t = setTimeout(() => setShaking(false), 500);
+    return () => clearTimeout(t);
+  }, [shaking]);
 
   const handleDigit = useCallback((d: string) => {
     if (disabled) return;

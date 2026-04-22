@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root/src-tauri"
+
+echo "[pre-push] cargo clippy -- -D warnings"
+cargo clippy -- -D warnings
