@@ -63,10 +63,14 @@ jobs:
               fail=1
             fi
           }
-          check package.json                             "$(jq -r .version package.json)"
-          check src-tauri/tauri.conf.json                "$(jq -r .version src-tauri/tauri.conf.json)"
-          check src-tauri/Cargo.toml                     "$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-          check src-tauri/gen/android/app/tauri.properties "$(grep '^tauri.android.versionName=' src-tauri/gen/android/app/tauri.properties | cut -d= -f2)"
+          check package.json              "$(jq -r .version package.json)"
+          check src-tauri/tauri.conf.json "$(jq -r .version src-tauri/tauri.conf.json)"
+          check src-tauri/Cargo.toml      "$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          # src-tauri/gen/android/app/tauri.properties is intentionally not
+          # checked here: Tauri gitignores it (see gen/android/app/.gitignore)
+          # and regenerates it from tauri.conf.json on every android build.
+          # Checking it would fail on a clean CI checkout and is redundant
+          # with the tauri.conf.json check above anyway.
           exit $fail
 
   android:
