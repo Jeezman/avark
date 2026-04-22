@@ -98,7 +98,7 @@ fn parse_bolt11_invoice(input: &str) -> Option<Bolt11Invoice> {
 }
 
 fn msat_to_sat(msat: u64) -> Option<u64> {
-    if msat % 1000 == 0 {
+    if msat.is_multiple_of(1000) {
         Some(msat / 1000)
     } else {
         None

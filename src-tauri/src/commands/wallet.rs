@@ -269,10 +269,11 @@ async fn finalize_wallet_setup(
     let store = secure_storage::SecureStorage::get_instance(app);
     if let Err(e) = store_mnemonic(store, secret.words()) {
         // Clean up all artifacts created during this attempt.
-        for artifact in [wallet_path(app), boarding_db_path(app), swap_db_path(app)] {
-            if let Ok(p) = artifact {
-                let _ = tokio::fs::remove_file(&p).await;
-            }
+        for p in [wallet_path(app), boarding_db_path(app), swap_db_path(app)]
+            .into_iter()
+            .flatten()
+        {
+            let _ = tokio::fs::remove_file(&p).await;
         }
         return Err(e);
     }
