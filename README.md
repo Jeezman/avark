@@ -132,3 +132,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 - **Frontend** (`src/`): React 19 + TypeScript, bundled with Vite 7
 - **Backend** (`src-tauri/`): Rust (Tauri 2), using [Arkade rust-sdk](https://github.com/arkade-os/rust-sdk) for Ark protocol operations
 - **IPC**: Frontend calls Rust commands via `invoke()` from `@tauri-apps/api/core`
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE) for the full text.
