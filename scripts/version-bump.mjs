@@ -1,0 +1,166 @@
+#!/usr/bin/env node
+// Bump the project version across the four files that must stay in lockstep
+// or the release workflow's `resolve` job will reject the tag:
+//
+//   - package.json                                   (JS tooling)
+//   - src-tauri/tauri.conf.json                      (Tauri canonical)
+//   - src-tauri/Cargo.toml                           (Rust crate)
+//   - src-tauri/gen/android/app/tauri.properties     (Android build inputs)
+//
+// Usage:
+//   pnpm version:bump 0.2.0
+//
+// Prerelease tags (e.g. `0.2.0-rc.1`) are rejected. Android's versionCode is
+// an integer and the simple formula below doesn't distinguish rc.1 from the
+// final release, so `rc.1 → 1.0.0` would hit INSTALL_FAILED_VERSION_DOWNGRADE
+// on-device. For an RC smoke test, bump files by hand, bump the versionCode
+// in tauri.properties to a distinct value, and uninstall between test
+// installs if you hit the downgrade block.
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function parseSemver(s) {
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(s);
+  if (!m) return null;
+  const [, major, minor, patch, prerelease] = m;
+  return {
+    major: Number(major),
+    minor: Number(minor),
+    patch: Number(patch),
+    prerelease: prerelease ?? "",
+    full: s,
+  };
+}
+
+function compareSemver(a, b) {
+  const core =
+    a.major - b.major || a.minor - b.minor || a.patch - b.patch;
+  if (core !== 0) return core;
+  // Pre-release sorts below release: 1.0.0 > 1.0.0-rc.1
+  if (!a.prerelease && b.prerelease) return 1;
+  if (a.prerelease && !b.prerelease) return -1;
+  return a.prerelease.localeCompare(b.prerelease);
+}
+
+function androidVersionCode({ major, minor, patch }) {
+  return major * 1_000_000 + minor * 1_000 + patch;
+}
+
+function updateJsonVersion(relPath, newVersion) {
+  const abs = path.join(root, relPath);
+  const parsed = JSON.parse(fs.readFileSync(abs, "utf8"));
+  const old = parsed.version;
+  parsed.version = newVersion;
+  fs.writeFileSync(abs, JSON.stringify(parsed, null, 2) + "\n");
+  return old;
+}
+
+function updateCargoVersion(relPath, newVersion) {
+  const abs = path.join(root, relPath);
+  const text = fs.readFileSync(abs, "utf8");
+  // First `version = "X.Y.Z"` under [package]. Avark has no workspace root,
+  // so this is unambiguous. The `^` + /m flag anchors `version` to column 1
+  // of a line so a hypothetical `# version = "…"` comment before the real
+  // line can't be matched by the lazy `[\s\S]*?`.
+  const re = /(\[package\][\s\S]*?\n)(^version\s*=\s*")([^"]+)(")/m;
+  const m = re.exec(text);
+  if (!m) throw new Error(`could not find [package].version in ${relPath}`);
+  const old = m[3];
+  fs.writeFileSync(abs, text.replace(re, `$1$2${newVersion}$4`));
+  return old;
+}
+
+function updateTauriProperties(relPath, newVersion, newCode) {
+  const abs = path.join(root, relPath);
+  const text = fs.readFileSync(abs, "utf8");
+  const oldName = /tauri\.android\.versionName=(.*)/.exec(text)?.[1]?.trim();
+  const oldCode = /tauri\.android\.versionCode=(.*)/.exec(text)?.[1]?.trim();
+  if (!oldName || !oldCode) {
+    throw new Error(`${relPath} missing versionName or versionCode line`);
+  }
+  const out = text
+    .replace(/tauri\.android\.versionName=.*/, `tauri.android.versionName=${newVersion}`)
+    .replace(/tauri\.android\.versionCode=.*/, `tauri.android.versionCode=${newCode}`);
+  fs.writeFileSync(abs, out);
+  return { oldName, oldCode };
+}
+
+// ---------------------------------------------------------------------------
+
+const [, , arg] = process.argv;
+if (!arg) {
+  console.error("Usage: pnpm version:bump <new-version>");
+  console.error("Example: pnpm version:bump 0.2.0");
+  process.exit(1);
+}
+
+const next = parseSemver(arg);
+if (!next) {
+  console.error(`Error: '${arg}' is not valid semver (expected X.Y.Z)`);
+  process.exit(1);
+}
+
+if (next.prerelease) {
+  console.error(
+    `Error: prerelease tags (like '${next.full}') are not supported by this script.`,
+  );
+  console.error(
+    `       The simple versionCode formula can't distinguish rc.N from the final release,`,
+  );
+  console.error(
+    `       which would cause INSTALL_FAILED_VERSION_DOWNGRADE on users' devices.`,
+  );
+  console.error(`       For an RC: bump files by hand and set a distinct versionCode.`);
+  process.exit(1);
+}
+
+const currentRaw = JSON.parse(
+  fs.readFileSync(path.join(root, "src-tauri/tauri.conf.json"), "utf8"),
+).version;
+const current = parseSemver(currentRaw);
+if (!current) {
+  console.error(`Error: src-tauri/tauri.conf.json has non-semver version '${currentRaw}'`);
+  process.exit(1);
+}
+
+if (compareSemver(next, current) <= 0) {
+  console.error(
+    `Error: refusing to bump — '${next.full}' is not strictly greater than current '${current.full}'.`,
+  );
+  console.error(
+    `       Android installs with same-or-lower versionCode are blocked on-device.`,
+  );
+  process.exit(1);
+}
+
+const newCode = androidVersionCode(next);
+
+console.log(`Bumping ${current.full} -> ${next.full} (Android versionCode -> ${newCode})`);
+console.log("");
+
+const r1 = updateJsonVersion("package.json", next.full);
+const r2 = updateJsonVersion("src-tauri/tauri.conf.json", next.full);
+const r3 = updateCargoVersion("src-tauri/Cargo.toml", next.full);
+const r4 = updateTauriProperties(
+  "src-tauri/gen/android/app/tauri.properties",
+  next.full,
+  String(newCode),
+);
+
+console.log("Updated:");
+console.log(`  package.json               ${r1}  ->  ${next.full}`);
+console.log(`  src-tauri/tauri.conf.json  ${r2}  ->  ${next.full}`);
+console.log(`  src-tauri/Cargo.toml       ${r3}  ->  ${next.full}`);
+console.log(`  src-tauri/gen/android/app/tauri.properties`);
+console.log(`    versionName              ${r4.oldName}  ->  ${next.full}`);
+console.log(`    versionCode              ${r4.oldCode}  ->  ${newCode}`);
+console.log("");
+console.log("Next:");
+console.log("  git diff                                   # review");
+console.log(`  git commit -am "chore: bump version to ${next.full}"`);
+console.log(`  git tag v${next.full}`);
+console.log(`  git push origin main && git push origin v${next.full}`);
