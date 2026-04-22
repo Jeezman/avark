@@ -263,8 +263,10 @@ function FiatTickerCard({
   // Keep the last rendered price so the shimmer skeleton during a currency
   // swap takes up the exact width a real price would — no layout pop when
   // the new quote arrives.
-  const lastPriceRef = useRef<string>("");
-  if (price) lastPriceRef.current = price;
+  const [lastPrice, setLastPrice] = useState<string>("");
+  if (price && price !== lastPrice) {
+    setLastPrice(price);
+  }
 
   // Derive the visible state. When a background refresh fails we keep the
   // last rate visible but mark it stale. When an initial fetch fails we
@@ -414,7 +416,7 @@ function FiatTickerCard({
               >
                 {/* Invisible sizer — matches the footprint of the real price */}
                 <span className="invisible text-2xl font-semibold tracking-tight">
-                  {lastPriceRef.current || "$00,000.00"}
+                  {lastPrice || "$00,000.00"}
                 </span>
                 <span className="shimmer-skeleton absolute inset-y-1 inset-x-0 rounded-md" />
               </span>

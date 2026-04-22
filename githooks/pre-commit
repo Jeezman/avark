@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+echo "[pre-commit] cargo fmt --check"
+(cd src-tauri && cargo fmt --check)
+
+echo "[pre-commit] tsc"
+pnpm exec tsc
+
+echo "[pre-commit] pnpm lint"
+pnpm lint
