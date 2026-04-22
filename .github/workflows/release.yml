@@ -157,18 +157,31 @@ jobs:
           # storeFile path is rootProject-relative, so drop the jks inside app/
           mv avark-release.jks app/avark-release.jks
 
-      - name: Build signed APK
-        # --target restricts Tauri's Rust cross-compile to the two ABIs
-        run: pnpm tauri android build --apk --target aarch64 --target armv7 -- --features vendored-openssl
+      - name: Build signed arm64-v8a APK
+        run: |
+          pnpm tauri android build --apk --target aarch64 -- --features vendored-openssl
+          V='${{ needs.resolve.outputs.version }}'
+          APK=src-tauri/gen/android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK" || { echo "::error::expected signed APK at $APK"; \
+            find src-tauri/gen/android/app/build/outputs/apk -type f; exit 1; }
+          mkdir -p artifacts
+          mv "$APK" "artifacts/avark-$V-android-arm64-v8a.apk"
+
+      - name: Build signed armeabi-v7a APK
+        run: |
+          pnpm tauri android build --apk --target armv7 -- --features vendored-openssl
+          V='${{ needs.resolve.outputs.version }}'
+          APK=src-tauri/gen/android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK" || { echo "::error::expected signed APK at $APK"; \
+            find src-tauri/gen/android/app/build/outputs/apk -type f; exit 1; }
+          mv "$APK" "artifacts/avark-$V-android-armeabi-v7a.apk"
 
       - name: Verify signatures on every output APK
         run: |
           BT=$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)
-          mapfile -t APKS < <(find src-tauri/gen/android/app/build/outputs/apk \
-            -name "*-release.apk" ! -name "*-unsigned*")
+          mapfile -t APKS < <(find artifacts -maxdepth 1 -name "*.apk")
           if [ "${#APKS[@]}" -eq 0 ]; then
-            echo "::error::no signed APKs found in build outputs"
-            find src-tauri/gen/android/app/build/outputs/apk -type f
+            echo "::error::no signed APKs in artifacts/"
             exit 1
           fi
           for APK in "${APKS[@]}"; do
@@ -176,21 +189,7 @@ jobs:
             "$ANDROID_SDK_ROOT/build-tools/$BT/apksigner" verify --verbose "$APK"
             "$ANDROID_SDK_ROOT/build-tools/$BT/apksigner" verify --print-certs "$APK"
           done
-
-      - name: Stage per-ABI release artifacts
-        run: |
           V='${{ needs.resolve.outputs.version }}'
-          mkdir -p artifacts
-          mapfile -t APKS < <(find src-tauri/gen/android/app/build/outputs/apk \
-            -name "*-release.apk" ! -name "*-unsigned*")
-          for APK in "${APKS[@]}"; do
-            case "$APK" in
-              *arm64-v8a*)     cp "$APK" "artifacts/avark-$V-android-arm64-v8a.apk" ;;
-              *armeabi-v7a*)   cp "$APK" "artifacts/avark-$V-android-armeabi-v7a.apk" ;;
-              *) echo "::warning::unexpected output APK (ignored): $APK" ;;
-            esac
-          done
-          # Both ABIs are required — fail loud if gradle's splits config drifted.
           test -f "artifacts/avark-$V-android-arm64-v8a.apk"
           test -f "artifacts/avark-$V-android-armeabi-v7a.apk"
           ls -la artifacts

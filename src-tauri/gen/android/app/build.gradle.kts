@@ -50,16 +50,6 @@ android {
             }
         }
     }
-    // Per-ABI split APKs — ship a separate arm64-v8a build (modern phones)
-    // and armeabi-v7a build (budget/older phones).
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
-        }
-    }
     buildTypes {
         getByName("debug") {
             // Debug installs as `com.jeezman.avark.debug` so it coexists with
