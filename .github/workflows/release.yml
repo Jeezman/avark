@@ -161,7 +161,7 @@ jobs:
         run: |
           pnpm tauri android build --apk --target aarch64 -- --features vendored-openssl
           V='${{ needs.resolve.outputs.version }}'
-          APK=src-tauri/gen/android/app/build/outputs/apk/release/app-release.apk
+          APK=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
           test -f "$APK" || { echo "::error::expected signed APK at $APK"; \
             find src-tauri/gen/android/app/build/outputs/apk -type f; exit 1; }
           mkdir -p artifacts
@@ -171,7 +171,7 @@ jobs:
         run: |
           pnpm tauri android build --apk --target armv7 -- --features vendored-openssl
           V='${{ needs.resolve.outputs.version }}'
-          APK=src-tauri/gen/android/app/build/outputs/apk/release/app-release.apk
+          APK=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
           test -f "$APK" || { echo "::error::expected signed APK at $APK"; \
             find src-tauri/gen/android/app/build/outputs/apk -type f; exit 1; }
           mv "$APK" "artifacts/avark-$V-android-armeabi-v7a.apk"
