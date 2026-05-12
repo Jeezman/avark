@@ -10,8 +10,7 @@
 //!   * `get_lendaswap_swap` — plain DB read (no remote refresh)
 //!   * `list_lendaswap_swaps` — paginated history query
 //!   * `get_lendaswap_xprv` — derives a LendaSwap-purpose xprv from the
-//!                            wallet's mnemonic and hands only that to the
-//!                            WebView.
+//!     wallet's mnemonic and hands only that to the WebView.
 
 use bitcoin::bip32::DerivationPath;
 use bitcoin::Network;
