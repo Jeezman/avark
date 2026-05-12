@@ -1,4 +1,5 @@
 pub mod coins;
+pub mod lendaswap;
 pub mod lightning;
 pub mod pin;
 pub mod receive;

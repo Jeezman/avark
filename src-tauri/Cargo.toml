@@ -1,6 +1,6 @@
 [package]
 name = "avark"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -21,6 +21,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# Proxy SDK fetches through Rust so mobile WebView origins aren't blocked by
+# api.lendaswap.com's CORS whitelist (desktop localhost:1420 is allowed; the
+# Android `http://tauri.localhost` and iOS `tauri://localhost` origins are not).
+tauri-plugin-http = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 thiserror = { version = "2", default-features = false }
@@ -47,6 +51,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 subtle = "2"
 hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# User-facing LendaSwap swap records live in a dedicated `lendaswap.db`.
+
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
 
 # Vendor OpenSSL for Android cross-compilation (ark-bdk-wallet pulls in native-tls via esplora-client)
 openssl = { version = "0.10", features = ["vendored"], optional = true }

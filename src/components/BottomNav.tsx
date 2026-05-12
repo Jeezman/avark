@@ -31,6 +31,15 @@ const tabs = [
     ),
   },
   {
+    to: "/swap",
+    label: "Swap",
+    icon: (
+      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M7 10l-3-3 3-3M4 7h13a3 3 0 013 3v0M17 14l3 3-3 3M20 17H7a3 3 0 01-3-3v0" />
+      </svg>
+    ),
+  },
+  {
     to: "/settings",
     label: "Settings",
     icon: (

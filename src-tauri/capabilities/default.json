@@ -5,6 +5,27 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "wc:*" }
+      ]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.lendaswap.com/*" },
+        { "url": "https://api.ark.boltz.exchange/*" },
+        { "url": "https://api.yadio.io/*" },
+        { "url": "https://arkade.computer/*" },
+        { "url": "https://cloudflare.com/*" },
+        { "url": "https://cloudflare-dns.com/*" },
+        { "url": "https://asp.109-176-197-122.nip.io/*" },
+        { "url": "http://afronut.xyz/*" },
+        { "url": "https://*.walletconnect.org/*" },
+        { "url": "https://*.walletconnect.com/*" }
+      ]
+    }
   ]
 }

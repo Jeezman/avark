@@ -7,9 +7,9 @@ use tracing::{debug, info, warn};
 
 use super::lightning::{spawn_pending_swap_recovery, BOLTZ_URL};
 use crate::{
-    ark, boarding_db_path, load_mnemonic, read_settings, secure_storage, store_mnemonic,
-    swap_db_path, wallet, wallet_path, write_settings, AppError, AppWalletState, GlobalWalletState,
-    SettingsLock, WalletCreationLock, MNEMONIC_KEY, ONCHAIN_SYNC_INTERVAL,
+    ark, boarding_db_path, lendaswap_db_path, load_mnemonic, read_settings, secure_storage,
+    store_mnemonic, swap_db_path, wallet, wallet_path, write_settings, AppError, AppWalletState,
+    GlobalWalletState, SettingsLock, WalletCreationLock, MNEMONIC_KEY, ONCHAIN_SYNC_INTERVAL,
 };
 
 #[derive(Debug, Serialize, serde::Deserialize)]
@@ -451,8 +451,11 @@ pub async fn delete_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
     let _ = store.delete(MNEMONIC_KEY);
 
     // 4. Best-effort cleanup of remaining files — don't bail on individual failures.
+    //    Includes lendaswap.db so a subsequent wallet restore doesn't hit
+    //    `MnemonicMismatch` against the SDK's stored mnemonic.
     let _ = remove_if_exists(&boarding_db_path(&app)?).await;
     let _ = remove_if_exists(&swap_db_path(&app)?).await;
+    let _ = remove_if_exists(&lendaswap_db_path(&app)?).await;
 
     // 5. Reset settings.
     let state = app.state::<SettingsLock>();

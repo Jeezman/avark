@@ -6,6 +6,7 @@ import { router } from "./router";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
 import { PinLockProvider } from "./context/PinLockContext";
 import { FiatProvider } from "./context/FiatContext";
+import { WalletConnectProvider } from "./context/WalletConnectContext";
 import "./App.css";
 
 function AppInner() {
@@ -28,7 +29,9 @@ function AppInner() {
       <Toaster theme={theme} position="top-center" richColors style={{ top: "env(safe-area-inset-top, 0px)" }} />
       <PinLockProvider>
         <FiatProvider>
-          <RouterProvider router={router} />
+          <WalletConnectProvider>
+            <RouterProvider router={router} />
+          </WalletConnectProvider>
         </FiatProvider>
       </PinLockProvider>
     </>

@@ -33,6 +33,9 @@
   --color-warning-bg: rgba(253, 224, 71, 0.2);
   --color-drawer-bg: #1f2937;
   --color-drawer-handle: rgba(255, 255, 255, 0.2);
+  --color-bitcoin: #f7931a;
+  --color-bitcoin-bg: rgba(247, 147, 26, 0.14);
+  --color-bitcoin-border: rgba(247, 147, 26, 0.4);
 }
 
 [data-theme="light"] {
@@ -57,6 +60,9 @@
   --color-warning-bg: rgba(202, 138, 4, 0.12);
   --color-drawer-bg: #ffffff;
   --color-drawer-handle: rgba(0, 0, 0, 0.15);
+  --color-bitcoin: #d97706;          /* amber-600 — darker for contrast on light bg */
+  --color-bitcoin-bg: rgba(217, 119, 6, 0.12);
+  --color-bitcoin-border: rgba(217, 119, 6, 0.35);
 }
 
 /* ── Theme utility classes ────────────────────────────────────────────── */
@@ -172,6 +178,129 @@
 
 .theme-input::placeholder {
   color: var(--color-text-faint);
+}
+
+/* Primary solid button — lime accent with near-black text for readable
+   contrast. Mirrors the Receive CTA style on the Dashboard. */
+.theme-button-primary {
+  background: var(--color-accent);
+  color: #0a0f0a;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+.theme-button-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.theme-button-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.theme-button-primary:disabled {
+  cursor: not-allowed;
+}
+
+/* Bitcoin semantic utilities — paired with --color-bitcoin for the
+   "paying BTC" side of swap UIs. */
+.theme-btc {
+  color: var(--color-bitcoin);
+}
+.theme-btc-bg {
+  background: var(--color-bitcoin-bg);
+  color: var(--color-bitcoin);
+}
+.theme-btc-border {
+  border-color: var(--color-bitcoin-border);
+}
+
+/* Display font — used sparingly on hero numerics + titles to give the
+   interface a monetary-instrument feel (Righteous is already loaded for
+   the splash screen, so no extra font request). */
+.font-display {
+  font-family: 'Righteous', cursive;
+  letter-spacing: 0.005em;
+}
+
+/* Live signal pulse — attach to the dot shown next to a fresh countdown. */
+@keyframes live-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(190, 242, 100, 0.45);
+  }
+  60% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 6px rgba(190, 242, 100, 0);
+  }
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(190, 242, 100, 0);
+  }
+}
+.live-dot {
+  animation: live-pulse 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Dot-grid background — subtle texture behind the unified swap panel
+   so it reads as a "machine surface" rather than a flat card. */
+.swap-surface {
+  position: relative;
+  background:
+    radial-gradient(
+      ellipse 120% 55% at 50% -10%,
+      var(--color-bitcoin-bg) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 120% 55% at 50% 110%,
+      var(--color-accent-bg) 0%,
+      transparent 55%
+    ),
+    var(--color-bg-card);
+}
+.swap-surface::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    var(--color-text-faint) 0.8px,
+    transparent 0
+  );
+  background-size: 14px 14px;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Checkout "claim ticket" surface — tighter dot-grid than .swap-surface,
+   no radial glow, so it reads as printed paper rather than machine glass. */
+.invoice-surface {
+  position: relative;
+  background: var(--color-bg-card);
+  overflow: hidden;
+}
+.invoice-surface::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    var(--color-text-faint) 0.7px,
+    transparent 0
+  );
+  background-size: 14px 14px;
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+/* Perforated divider — dashed horizontal line for ticket stubs. */
+.perforation {
+  height: 1px;
+  background-image: linear-gradient(
+    to right,
+    var(--color-border) 0,
+    var(--color-border) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  background-size: 8px 1px;
+  background-repeat: repeat-x;
 }
 
 /* Hide scrollbar for horizontal scroll containers */

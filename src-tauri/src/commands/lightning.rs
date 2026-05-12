@@ -1,4 +1,5 @@
 use ark_client::SwapStorage as _;
+use bitcoin::hashes::Hash as _;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -540,6 +541,248 @@ pub async fn retry_claim_swap(app: tauri::AppHandle, swap_id: String) -> Result<
     Ok(msg)
 }
 
+// ── Submarine-swap recovery ─────────────────────────────────────────────────
+//
+// Submarine swaps (send path) lock sats into a VHTLC while Boltz routes the
+// Lightning payment. If `pay_ln_invoice` returns but `wait_for_invoice_paid`
+// is interrupted (app kill, network blip, tauri_spawn cancellation), the
+// swap is orphaned in avark's UI even though the VHTLC is perfectly fine.
+//
+// These commands expose the stored submarine swaps so users can see what's
+// stuck and refund if Boltz is never going to route the payment.
+
+/// Boltz statuses where the VHTLC still holds funds AND a refund is allowed.
+/// Cooperative refund (`refund_vhtlc`) works for the non-expired variants;
+/// `swap.expired` requires the unilateral `refund_expired_vhtlc` path.
+fn is_refundable_boltz_status(status: &str) -> bool {
+    matches!(
+        status,
+        "transaction.failed" | "invoice.failedToPay" | "invoice.expired" | "swap.expired"
+    )
+}
+
+fn needs_unilateral_refund(status: &str) -> bool {
+    status == "swap.expired"
+}
+
+#[derive(Serialize)]
+pub struct SubmarineSwapRecord {
+    pub id: String,
+    pub amount_sat: u64,
+    /// BOLT11 payment hash in hex. Truncated display is a UI concern.
+    pub payment_hash: String,
+    pub created_at: u64,
+    /// avark's locally-cached Boltz status (may be stale).
+    pub local_status: String,
+    /// Freshly-fetched Boltz status, or `None` if the API was unreachable.
+    pub boltz_status: Option<String>,
+    pub is_terminal: bool,
+    pub is_successful_terminal: bool,
+    /// True when the funds are still locked AND a refund path is available.
+    pub is_refundable: bool,
+    /// True when the timelock has expired — refund goes via the unilateral
+    /// path (`refund_submarine_swap` dispatches automatically).
+    pub is_expired_timelock: bool,
+}
+
+#[tauri::command]
+pub async fn list_pending_submarine_swaps(
+    app: tauri::AppHandle,
+) -> Result<Vec<SubmarineSwapRecord>, AppError> {
+    let swap_storage = {
+        let state = app.state::<GlobalWalletState>();
+        let guard = state.0.read().await;
+        Arc::clone(
+            &guard
+                .as_ref()
+                .ok_or_else(|| AppError::Wallet("Wallet not connected".into()))?
+                .swap_storage,
+        )
+    };
+
+    let swaps = swap_storage
+        .list_all_submarine()
+        .await
+        .map_err(|e| AppError::Wallet(format!("Failed to list swaps: {e}")))?;
+
+    // Submarine swaps have a ~24h timelock on Boltz. Fetch fresh status for
+    // anything within a 48h window — older swaps are certainly terminal and
+    // not worth an API round-trip. Sort newest-first so the UI can render
+    // the most relevant (usually just-attempted) swap at the top.
+    const RECENT_WINDOW_SECS: u64 = 48 * 60 * 60;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut records = Vec::with_capacity(swaps.len());
+    let mut pending: Vec<(usize, String)> = Vec::new();
+
+    for s in &swaps {
+        let local_status = serde_json::to_value(&s.status)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_else(|| format!("{:?}", s.status));
+
+        let idx = records.len();
+        records.push(SubmarineSwapRecord {
+            id: s.id.clone(),
+            amount_sat: s.amount.to_sat(),
+            payment_hash: hex::encode(s.preimage_hash.to_byte_array()),
+            created_at: s.created_at,
+            local_status: local_status.clone(),
+            boltz_status: None,
+            is_terminal: is_terminal_status(&local_status),
+            is_successful_terminal: is_successful_terminal(&local_status),
+            is_refundable: is_refundable_boltz_status(&local_status),
+            is_expired_timelock: needs_unilateral_refund(&local_status),
+        });
+
+        if now.saturating_sub(s.created_at) < RECENT_WINDOW_SECS {
+            pending.push((idx, s.id.clone()));
+        }
+    }
+
+    // Refresh Boltz status for in-window swaps in parallel.
+    if !pending.is_empty() {
+        let mut set = tokio::task::JoinSet::new();
+        for (idx, swap_id) in &pending {
+            let id = swap_id.clone();
+            let i = *idx;
+            set.spawn(async move {
+                let result = check_boltz_status(&id).await;
+                (i, result)
+            });
+        }
+
+        while let Some(Ok((idx, result))) = set.join_next().await {
+            if let Ok(boltz_status) = result {
+                records[idx].boltz_status = Some(boltz_status.clone());
+                records[idx].is_terminal = is_terminal_status(&boltz_status);
+                records[idx].is_successful_terminal = is_successful_terminal(&boltz_status);
+                records[idx].is_refundable = is_refundable_boltz_status(&boltz_status);
+                records[idx].is_expired_timelock = needs_unilateral_refund(&boltz_status);
+            }
+        }
+    }
+
+    // Newest first. The user's "just now stuck" swap should be at the top.
+    records.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+
+    Ok(records)
+}
+
+#[tauri::command]
+pub async fn refund_submarine_swap(
+    app: tauri::AppHandle,
+    swap_id: String,
+) -> Result<String, AppError> {
+    let (client, swap_storage) = {
+        let state = app.state::<GlobalWalletState>();
+        let guard = state.0.read().await;
+        let ws = guard
+            .as_ref()
+            .ok_or_else(|| AppError::Wallet("Wallet not connected".into()))?;
+        (Arc::clone(&ws.client), Arc::clone(&ws.swap_storage))
+    };
+
+    // Fetch the freshest Boltz status so we pick the right refund path.
+    // If Boltz is unreachable we can't safely call cooperative refund, but
+    // we can still offer the unilateral path if the user knows the timelock
+    // has passed — kept simple for now, require a live status.
+    let boltz_status = check_boltz_status(&swap_id).await.map_err(|e| {
+        AppError::Wallet(format!(
+            "Couldn't reach Boltz to confirm the swap's current state: {e}"
+        ))
+    })?;
+
+    if !is_refundable_boltz_status(&boltz_status) {
+        return Err(AppError::Wallet(format!(
+            "Swap is not refundable yet (Boltz status: {boltz_status}). \
+             If it's still routing, wait — the checkout screen will update \
+             automatically once it settles."
+        )));
+    }
+
+    info!(swap_id = %swap_id, status = %boltz_status, "refunding submarine swap");
+    let _ = app.emit(
+        "ln-swap-progress",
+        format!("[{swap_id}] Refunding via Boltz (status: {boltz_status})..."),
+    );
+
+    let txid = if needs_unilateral_refund(&boltz_status) {
+        // Timelock expired — no Boltz signature needed.
+        client
+            .refund_expired_vhtlc(&swap_id)
+            .await
+            .map_err(|e| AppError::Wallet(format!("Unilateral refund failed: {e}")))?
+    } else {
+        // Cooperative refund — Boltz co-signs. Much faster than waiting for
+        // the timelock since the swap failed and Boltz knows it.
+        client
+            .refund_vhtlc(&swap_id)
+            .await
+            .map_err(|e| AppError::Wallet(format!("Cooperative refund failed: {e}")))?
+    };
+
+    info!(swap_id = %swap_id, refund_txid = %txid, "submarine swap refunded");
+
+    // Our refund tx is on-chain — mark the swap as refunded locally so the
+    // recovery UI doesn't keep offering the refund button while Boltz's
+    // status lags behind. `sync_swap_status_submarine` short-circuits on a
+    // parse failure; the log is purely diagnostic.
+    sync_swap_status_submarine(&swap_storage, &swap_id, "transaction.refunded").await;
+
+    Ok(txid.to_string())
+}
+
+/// Mirror of `sync_swap_status` for submarine swaps. The SDK's `SwapStatus`
+/// enum is not re-exported from `ark_client`'s root, but we can lean on
+/// type inference via `SubmarineSwapData::status` to deserialize into it
+/// without ever having to name the enum directly.
+async fn sync_swap_status_submarine(
+    storage: &ark_client::SqliteSwapStorage,
+    swap_id: &str,
+    status_str: &str,
+) {
+    let mut data = match storage.get_submarine(swap_id).await {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            warn!(swap_id = %swap_id, "submarine swap not found in storage");
+            return;
+        }
+        Err(e) => {
+            warn!(
+                swap_id = %swap_id,
+                error = %e,
+                "failed to read submarine swap before status sync"
+            );
+            return;
+        }
+    };
+    // `data.status: SwapStatus` drives the deserializer's type inference.
+    match serde_json::from_value(serde_json::Value::String(status_str.to_string())) {
+        Ok(new_status) => {
+            data.status = new_status;
+            if let Err(e) = storage.update_status_submarine(swap_id, data.status).await {
+                warn!(
+                    swap_id = %swap_id,
+                    error = %e,
+                    "failed to update submarine swap status locally"
+                );
+            }
+        }
+        Err(e) => {
+            warn!(
+                swap_id = %swap_id,
+                status = %status_str,
+                error = %e,
+                "could not deserialize Boltz status into SwapStatus enum"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -620,5 +863,44 @@ mod tests {
                 "successful terminal status {status} must also be terminal"
             );
         }
+    }
+
+    // ── is_refundable_boltz_status ──────────────────────────────────────
+
+    #[test]
+    fn refundable_statuses() {
+        for status in [
+            "transaction.failed",
+            "invoice.failedToPay",
+            "invoice.expired",
+            "swap.expired",
+        ] {
+            assert!(
+                is_refundable_boltz_status(status),
+                "{status} should be refundable"
+            );
+        }
+    }
+
+    #[test]
+    fn non_refundable_statuses() {
+        // Successful terminals — funds went to Boltz as intended.
+        assert!(!is_refundable_boltz_status("transaction.claimed"));
+        assert!(!is_refundable_boltz_status("invoice.settled"));
+        // Already refunded — nothing left to refund.
+        assert!(!is_refundable_boltz_status("transaction.refunded"));
+        // In-flight — still routing, may still succeed.
+        assert!(!is_refundable_boltz_status("transaction.mempool"));
+        assert!(!is_refundable_boltz_status("invoice.pending"));
+        assert!(!is_refundable_boltz_status("swap.created"));
+    }
+
+    #[test]
+    fn unilateral_refund_only_on_timelock_expiry() {
+        assert!(needs_unilateral_refund("swap.expired"));
+        // Cooperative-refundable states should not need unilateral.
+        assert!(!needs_unilateral_refund("transaction.failed"));
+        assert!(!needs_unilateral_refund("invoice.failedToPay"));
+        assert!(!needs_unilateral_refund("invoice.expired"));
     }
 }

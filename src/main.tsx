@@ -1,5 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+// Install the fetch proxy before any SDK code runs. See the module for why.
+import "./lib/tauriFetch";
 import App from "./App";
 
 // Track the largest observed viewport height for bottom sheet sizing.

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use ark_client::lightning_invoice::Bolt11Invoice;
 use serde::Serialize;
@@ -107,8 +108,23 @@ fn msat_to_sat(msat: u64) -> Option<u64> {
 
 #[derive(Serialize)]
 pub struct SendResult {
-    txid: String,
+    /// For Lightning: the VHTLC funding txid (Boltz claims this VTXO once
+    /// the LN payment routes). For Ark/onchain: the actual send txid.
+    pub txid: String,
+    /// Lightning-only. Set to the Boltz submarine swap id if settlement
+    /// didn't complete within the timeout. The VHTLC is already funded;
+    /// the LN route is still resolving in the background. Callers should
+    /// render this as in-flight / pending, not as success.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "pendingLnSwapId")]
+    pub pending_ln_swap_id: Option<String>,
 }
+
+/// How long we wait for the Lightning invoice to settle before returning
+/// with a pending marker. The VHTLC funding already happened synchronously
+/// in `pay_ln_invoice`; this is purely the "is Boltz done routing?" window.
+/// Tuned for UI responsiveness — the polling/reconciliation layer catches
+/// the actual settlement eventually.
+const LN_SETTLEMENT_WAIT: Duration = Duration::from_secs(30);
 
 #[tauri::command]
 pub async fn send_lightning(
@@ -158,22 +174,50 @@ pub async fn send_lightning(
         ),
     );
 
+    // Wait for LN settlement up to `LN_SETTLEMENT_WAIT`. The SDK's
+    // `wait_for_invoice_paid` itself has no deadline, so we wrap it in
+    // `tokio::time::timeout` — on elapse, return Ok with `pending_ln_swap_id`
+    // so the UI can render a stable "routing" state instead of hanging.
     let wait_result = tokio::select! {
         biased;
         _ = cancel_rx.changed() => {
-            return Err(AppError::Wallet("Wallet disconnected while paying Lightning invoice".into()));
+            return Err(AppError::Wallet(
+                "Wallet disconnected while paying Lightning invoice".into(),
+            ));
         }
-        wait = client.wait_for_invoice_paid(&result.swap_id) => wait,
+        wait = tokio::time::timeout(LN_SETTLEMENT_WAIT, client.wait_for_invoice_paid(&result.swap_id)) => wait,
     };
 
-    wait_result
-        .map_err(|e| AppError::Wallet(format!("Lightning payment did not complete: {e}")))?;
-
-    info!(swap_id = %result.swap_id, txid = %result.txid, "Lightning invoice paid");
-
-    Ok(SendResult {
-        txid: result.txid.to_string(),
-    })
+    match wait_result {
+        Ok(Ok(())) => {
+            info!(swap_id = %result.swap_id, txid = %result.txid, "Lightning invoice paid");
+            Ok(SendResult {
+                txid: result.txid.to_string(),
+                pending_ln_swap_id: None,
+            })
+        }
+        Ok(Err(e)) => {
+            // SDK observed an error (Boltz rejected / timed out unilaterally).
+            // The VHTLC is still funded and refundable via the recovery screen.
+            Err(AppError::Wallet(format!(
+                "Lightning payment did not complete: {e}"
+            )))
+        }
+        Err(_elapsed) => {
+            // Our window elapsed but the SDK is still waiting. Return a
+            // pending marker; polling / recovery handle the eventual resolution.
+            info!(
+                swap_id = %result.swap_id,
+                txid = %result.txid,
+                "Lightning settlement still in flight after {}s — returning pending",
+                LN_SETTLEMENT_WAIT.as_secs()
+            );
+            Ok(SendResult {
+                txid: result.txid.to_string(),
+                pending_ln_swap_id: Some(result.swap_id.clone()),
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -211,6 +255,7 @@ pub async fn send_ark(
 
     Ok(SendResult {
         txid: txid.to_string(),
+        pending_ln_swap_id: None,
     })
 }
 
@@ -254,6 +299,7 @@ pub async fn send_onchain(
 
     Ok(SendResult {
         txid: txid.to_string(),
+        pending_ln_swap_id: None,
     })
 }
 
@@ -339,9 +385,24 @@ mod tests {
     fn send_result_serializes() {
         let result = SendResult {
             txid: "abc123".to_string(),
+            pending_ln_swap_id: None,
         };
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["txid"], "abc123");
+        // `skip_serializing_if = "Option::is_none"` keeps the field out of the
+        // JSON entirely when absent, so Ark/onchain payloads look unchanged.
+        assert!(json.get("pendingLnSwapId").is_none());
+    }
+
+    #[test]
+    fn send_result_pending_serializes() {
+        let result = SendResult {
+            txid: "abc123".to_string(),
+            pending_ln_swap_id: Some("boltz-swap-xyz".to_string()),
+        };
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["txid"], "abc123");
+        assert_eq!(json["pendingLnSwapId"], "boltz-swap-xyz");
     }
 
     #[test]
