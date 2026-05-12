@@ -667,7 +667,7 @@ pub async fn list_pending_submarine_swaps(
     }
 
     // Newest first. The user's "just now stuck" swap should be at the top.
-    records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    records.sort_by_key(|r| std::cmp::Reverse(r.created_at));
 
     Ok(records)
 }
