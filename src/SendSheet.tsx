@@ -29,6 +29,13 @@ interface DetectAddressResult {
 
 interface SendResult {
   txid: string;
+  /**
+   * Lightning-only. When present, the VHTLC funding tx (`txid`) is on-chain
+   * but the LN settlement is still routing — treat the payment as submitted,
+   * not completed. The checkout screen uses this to flip to its "routing"
+   * state; SendSheet surfaces different success copy.
+   */
+  pendingLnSwapId?: string | null;
 }
 
 type Step = 'form' | 'confirm' | 'sending' | 'success' | 'error';
@@ -55,6 +62,7 @@ function SendSheetContent({
   const [scanning, setScanning] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [txid, setTxid] = useState<string | null>(null);
+  const [lnPending, setLnPending] = useState(false);
 
   const amountSats = /^\d+$/.test(amountInput) ? Number(amountInput) : null;
   const amountFiat = useSatsToFiat(amountSats ?? 0);
@@ -311,6 +319,7 @@ function SendSheetContent({
         });
       }
       setTxid(result.txid);
+      setLnPending(Boolean(result.pendingLnSwapId));
       setStep('success');
       onSuccess();
     } catch (err) {
@@ -589,14 +598,25 @@ function SendSheetContent({
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <p className="text-lg font-bold theme-text mb-1">Sent!</p>
-        <p className="text-sm theme-text-muted mb-4">
+        <p className="text-lg font-bold theme-text mb-1">
+          {lnPending ? 'Routing…' : 'Sent!'}
+        </p>
+        <p className="text-sm theme-text-muted mb-4 text-center max-w-[260px]">
           {amountSats != null ? formatSats(amountSats) : ''} sats{' '}
           {addressType === 'ark'
             ? 'via Ark'
             : addressType === 'bitcoin'
               ? 'onchain'
               : 'via Lightning'}
+          {lnPending && (
+            <>
+              <br />
+              <span className="text-xs theme-text-faint">
+                Funded but still routing. It may take a minute to settle —
+                you can close this.
+              </span>
+            </>
+          )}
         </p>
         {txid && (
           <button

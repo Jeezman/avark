@@ -112,7 +112,6 @@ pub fn derive_master_xpriv_from_secret(
     Ok(xpriv)
 }
 
-#[allow(dead_code)]
 /// Derive an extended private key at a specific BIP-32 derivation path.
 ///
 /// Uses an empty BIP39 passphrase (the spec-default). This is intentional:

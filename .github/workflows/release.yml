@@ -158,6 +158,9 @@ jobs:
           mv avark-release.jks app/avark-release.jks
 
       - name: Build signed arm64-v8a APK
+        env:
+          VITE_WALLETCONNECT_PROJECT_ID: ${{ vars.VITE_WALLETCONNECT_PROJECT_ID }}
+          VITE_DEFAULT_ASP_URL: ${{ vars.VITE_DEFAULT_ASP_URL }}
         run: |
           pnpm tauri android build --apk --target aarch64 -- --features vendored-openssl
           V='${{ needs.resolve.outputs.version }}'
@@ -168,6 +171,9 @@ jobs:
           mv "$APK" "artifacts/avark-$V-android-arm64-v8a.apk"
 
       - name: Build signed armeabi-v7a APK
+        env:
+          VITE_WALLETCONNECT_PROJECT_ID: ${{ vars.VITE_WALLETCONNECT_PROJECT_ID }}
+          VITE_DEFAULT_ASP_URL: ${{ vars.VITE_DEFAULT_ASP_URL }}
         run: |
           pnpm tauri android build --apk --target armv7 -- --features vendored-openssl
           V='${{ needs.resolve.outputs.version }}'

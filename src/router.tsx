@@ -6,6 +6,10 @@ import { OnboardingRoute } from "./routes/onboarding-route";
 import { TransactionsRoute } from "./routes/transactions-route";
 import { SettingsRoute } from "./routes/settings-route";
 import { CoinsRoute } from "./routes/coins-route";
+import { SwapRoute } from "./routes/swap-route";
+import { SwapCheckoutRoute } from "./routes/swap-checkout-route";
+import { SwapHistoryRoute } from "./routes/swap-history-route";
+import { RecoverLnRoute } from "./routes/recover-ln-route";
 import { AppLayout } from "./components/AppLayout";
 
 const rootRoute = createRootRoute();
@@ -66,10 +70,43 @@ const settingsRoute = createRoute({
   component: SettingsRoute,
 });
 
+const swapRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/swap",
+  component: SwapRoute,
+});
+
+const swapCheckoutRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/swap/checkout/$id",
+  component: SwapCheckoutRoute,
+});
+
+const swapHistoryRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/swap/history",
+  component: SwapHistoryRoute,
+});
+
+const recoverLnRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/recover/ln",
+  component: RecoverLnRoute,
+});
+
 const routeTree = rootRoute.addChildren([
   bootRoute,
   onboardingRoute,
-  appLayoutRoute.addChildren([dashboardRoute, transactionsRoute, coinsRoute, settingsRoute]),
+  appLayoutRoute.addChildren([
+    dashboardRoute,
+    transactionsRoute,
+    coinsRoute,
+    swapRoute,
+    swapCheckoutRoute,
+    swapHistoryRoute,
+    recoverLnRoute,
+    settingsRoute,
+  ]),
 ]);
 
 export const router = createRouter({

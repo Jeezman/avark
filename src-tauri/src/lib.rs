@@ -1,5 +1,6 @@
 mod ark;
 mod commands;
+mod lendaswap;
 mod secure_storage;
 mod wallet;
 
@@ -111,6 +112,10 @@ pub(crate) fn swap_db_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> 
     app_data_file(app, "swaps.db")
 }
 
+pub(crate) fn lendaswap_db_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+    app_data_file(app, "lendaswap.db")
+}
+
 pub(crate) const MNEMONIC_KEY: &str = "wallet-mnemonic";
 
 pub(crate) fn store_mnemonic(
@@ -145,8 +150,7 @@ pub(crate) async fn write_settings(
         tokio::fs::create_dir_all(dir).await?;
     }
     let data = serde_json::to_string_pretty(settings)?;
-    // Atomic write: write to a temp file then rename, so a crash mid-write
-    // never leaves a corrupted settings.json.
+    // Atomic write: write to a temp file then rename
     let tmp = path.with_extension("json.tmp");
     tokio::fs::write(&tmp, data).await?;
     tokio::fs::rename(&tmp, &path).await?;
@@ -235,6 +239,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_http::init())
         .plugin(secure_storage::init())
         .manage(SettingsLock(RwLock::new(())))
         .manage(GlobalWalletState(RwLock::new(None)))
@@ -242,6 +247,34 @@ pub fn run() {
         .manage(commands::receive::ReceiveSubscriptionState(
             tokio::sync::Mutex::new(None),
         ))
+        .setup(|app| {
+            // Open the swap records DB. Failure here leaves avark's core
+            // wallet features fully functional; the Swap tab will fail loudly
+            // on first IPC call. The frontend reconciliation logic surfaces
+            // that as a user-visible error (`formatLendaSwapError`).
+            let handle = app.handle().clone();
+            match lendaswap_db_path(&handle) {
+                Ok(db_path) => match tauri::async_runtime::block_on(lendaswap::init(&db_path)) {
+                    Ok(pool) => {
+                        app.manage(lendaswap::LendaSwapDb(pool));
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            path = %db_path.display(),
+                            "lendaswap db init failed — swap commands will error"
+                        );
+                    }
+                },
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        "failed to resolve lendaswap db path — swap commands will error"
+                    );
+                }
+            };
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Onboarding
             has_seen_onboarding,
@@ -275,6 +308,15 @@ pub fn run() {
             commands::lightning::get_ln_invoice,
             commands::lightning::debug_list_swaps,
             commands::lightning::retry_claim_swap,
+            commands::lightning::list_pending_submarine_swaps,
+            commands::lightning::refund_submarine_swap,
+            // LendaSwap — DB-only, TS SDK handles network calls
+            commands::lendaswap::insert_lendaswap_swap,
+            commands::lendaswap::update_lendaswap_swap_status,
+            commands::lendaswap::dismiss_lendaswap_swap,
+            commands::lendaswap::get_lendaswap_swap,
+            commands::lendaswap::list_lendaswap_swaps,
+            commands::lendaswap::get_lendaswap_xprv,
             // Receive subscription
             commands::receive::start_receive_subscription,
             commands::receive::stop_receive_subscription,

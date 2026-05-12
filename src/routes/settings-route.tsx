@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useTheme } from "../context/ThemeContext";
 import { PinSetupFlow, PinDisableFlow, usePinLock } from "../context/PinLockContext";
 import { useFiat } from "../context/FiatContext";
@@ -777,6 +777,34 @@ export function SettingsRoute() {
             }
           }}
         />
+      </div>
+
+      {/* Recovery */}
+      <div className="px-6 mb-6">
+        <h2 className="text-xs font-semibold theme-text-muted uppercase tracking-wider mb-3">Recovery</h2>
+        <Link
+          to="/recover/ln"
+          className="flex items-center justify-between rounded-2xl theme-card p-4 gap-3"
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-semibold theme-text">Stuck Lightning payments</p>
+            <p className="text-xs theme-text-muted leading-snug mt-0.5">
+              Inspect and refund submarine swaps that didn&rsquo;t settle.
+            </p>
+          </div>
+          <svg
+            className="h-4 w-4 shrink-0 theme-text-muted"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </Link>
       </div>
 
       {/* About */}
