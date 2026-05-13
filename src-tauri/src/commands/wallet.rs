@@ -446,9 +446,12 @@ pub async fn delete_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
     //    it early ensures the app won't see a "wallet exists" state if later steps fail.
     let _ = remove_if_exists(&wallet_path(&app)?).await;
 
-    // 3. Delete mnemonic from secure storage.
+    // 3. Delete mnemonic and Nostr identity from secure storage. WIPE means a
+    //    clean slate — leaving the nsec behind would resurrect the previous
+    //    npub on re-onboarding.
     let store = secure_storage::SecureStorage::get_instance(&app);
     let _ = store.delete(MNEMONIC_KEY);
+    let _ = store.delete(crate::nostr::NSEC_KEY);
 
     // 4. Best-effort cleanup of remaining files — don't bail on individual failures.
     //    Includes lendaswap.db so a subsequent wallet restore doesn't hit

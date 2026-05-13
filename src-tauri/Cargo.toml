@@ -52,6 +52,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 subtle = "2"
 hex = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
+nostr-sdk = { version = "0.42", default-features = false }
 
 # User-facing LendaSwap swap records live in a dedicated `lendaswap.db`.
 

@@ -303,6 +303,64 @@
   background-repeat: repeat-x;
 }
 
+/* Identity-card surface — dot grid with a single lime glow at the top, so it
+   reads as a printed credential being "issued" outward. Sibling of
+   .swap-surface (machine glass) and .invoice-surface (claim ticket). */
+.identity-surface {
+  position: relative;
+  background:
+    radial-gradient(
+      ellipse 110% 55% at 50% -5%,
+      var(--color-accent-bg) 0%,
+      transparent 60%
+    ),
+    var(--color-bg-card);
+  overflow: hidden;
+}
+.identity-surface::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    var(--color-text-faint) 0.7px,
+    transparent 0
+  );
+  background-size: 16px 16px;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Corner brackets — passport / credential security marks. Pin all four to an
+   absolutely-positioned ancestor. */
+.id-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+.id-corner-tl { top: 12px; left: 12px; border-top: 1.5px solid var(--color-text-muted); border-left: 1.5px solid var(--color-text-muted); }
+.id-corner-tr { top: 12px; right: 12px; border-top: 1.5px solid var(--color-text-muted); border-right: 1.5px solid var(--color-text-muted); }
+.id-corner-bl { bottom: 12px; left: 12px; border-bottom: 1.5px solid var(--color-text-muted); border-left: 1.5px solid var(--color-text-muted); }
+.id-corner-br { bottom: 12px; right: 12px; border-bottom: 1.5px solid var(--color-text-muted); border-right: 1.5px solid var(--color-text-muted); }
+
+/* Hairline accent ring offset from the identicon for a "security feature"
+   feel. The outer ring picks up the page background so it reads as a
+   floating mark, not a stroke. */
+.identicon-ring {
+  position: relative;
+  isolation: isolate;
+}
+.identicon-ring::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-accent);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 /* Hide scrollbar for horizontal scroll containers */
 .scrollbar-none {
   -ms-overflow-style: none;
