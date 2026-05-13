@@ -1,6 +1,7 @@
 mod ark;
 mod commands;
 mod lendaswap;
+mod nostr;
 mod secure_storage;
 mod wallet;
 
@@ -61,6 +62,12 @@ pub(crate) struct GlobalWalletState(pub(crate) RwLock<Option<AppWalletState>>);
 /// Guards wallet creation so only one can run at a time.
 pub(crate) struct WalletCreationLock(pub(crate) tokio::sync::Mutex<()>);
 
+/// Guards the read-generate-write sequence in `nostr_generate_identity`.
+/// Without this, two concurrent callers can both observe an empty NSEC_KEY,
+/// generate different keypairs, and race on `store.set` — leaving the caller
+/// holding an `npub` that no longer matches the stored `nsec`.
+pub(crate) struct NostrGenerateLock(pub(crate) tokio::sync::Mutex<()>);
+
 /// Interval for background onchain wallet sync.
 pub(crate) const ONCHAIN_SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -78,6 +85,8 @@ pub(crate) enum AppError {
     Wallet(String),
     #[error("Secure storage error: {0}")]
     SecureStorage(#[from] secure_storage::Error),
+    #[error("Nostr error: {0}")]
+    Nostr(String),
 }
 
 impl Serialize for AppError {
@@ -244,6 +253,7 @@ pub fn run() {
         .manage(SettingsLock(RwLock::new(())))
         .manage(GlobalWalletState(RwLock::new(None)))
         .manage(WalletCreationLock(tokio::sync::Mutex::new(())))
+        .manage(NostrGenerateLock(tokio::sync::Mutex::new(())))
         .manage(commands::receive::ReceiveSubscriptionState(
             tokio::sync::Mutex::new(None),
         ))
@@ -339,6 +349,12 @@ pub fn run() {
             commands::share::share_text,
             // Round schedule
             commands::wallet::get_round_schedule,
+            // Nostr identity
+            commands::nostr::nostr_generate_identity,
+            commands::nostr::nostr_get_identity,
+            commands::nostr::nostr_reveal_nsec,
+            commands::nostr::nostr_publish_metadata,
+            commands::nostr::nostr_fetch_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

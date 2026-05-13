@@ -9,6 +9,7 @@ import { useSatsToFiat } from '../context/FiatContext';
 import { formatSats } from '../utils/format';
 import { TransactionRow } from '../components/TransactionRow';
 import { NextRoundCountdown } from '../components/NextRoundCountdown';
+import { IdentityChip } from '../components/IdentityChip';
 
 interface SettleResult {
   settled: boolean;
@@ -42,7 +43,7 @@ export function DashboardRoute() {
     >
       {/* Header */}
       <div className="flex items-center justify-between px-6 pt-4 pb-2">
-        <h1 className="text-lg font-bold">Avark</h1>
+        <IdentityChip />
         <div className="flex items-center gap-2">
           <button
             onClick={() => setAutoRefresh((v) => !v)}

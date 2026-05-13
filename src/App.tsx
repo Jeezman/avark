@@ -7,6 +7,7 @@ import { ThemeProvider, useTheme } from "./context/ThemeContext";
 import { PinLockProvider } from "./context/PinLockContext";
 import { FiatProvider } from "./context/FiatContext";
 import { WalletConnectProvider } from "./context/WalletConnectContext";
+import { NostrIdentityProvider } from "./context/NostrIdentityContext";
 import "./App.css";
 
 function AppInner() {
@@ -30,7 +31,9 @@ function AppInner() {
       <PinLockProvider>
         <FiatProvider>
           <WalletConnectProvider>
-            <RouterProvider router={router} />
+            <NostrIdentityProvider>
+              <RouterProvider router={router} />
+            </NostrIdentityProvider>
           </WalletConnectProvider>
         </FiatProvider>
       </PinLockProvider>
