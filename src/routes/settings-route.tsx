@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useTheme } from "../context/ThemeContext";
@@ -475,6 +476,7 @@ export function SettingsRoute() {
   } = useFiat();
   const [pinFlow, setPinFlow] = useState<"none" | "setup" | "disable">("none");
   const [maxAttempts, setMaxAttempts] = useState(10);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [nsecStep, setNsecStep] = useState<"hidden" | "confirm" | "revealed">("hidden");
   const [nsec, setNsec] = useState<string | null>(null);
   const [loadingNsec, setLoadingNsec] = useState(false);
@@ -501,6 +503,12 @@ export function SettingsRoute() {
       .then((s) => setMaxAttempts(s.max_attempts))
       .catch(() => {});
   }, [pinEnabled]);
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
 
   const handleRevealSeed = async () => {
     if (mnemonic) {
@@ -958,7 +966,9 @@ export function SettingsRoute() {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm theme-text-secondary">Version</span>
-            <span className="text-sm font-mono theme-text-muted">0.1.0</span>
+            <span className="text-sm font-mono theme-text-muted">
+              {appVersion ?? "—"}
+            </span>
           </div>
         </div>
       </div>
