@@ -6,7 +6,7 @@ use tracing::info;
 
 use crate::{ark, AppError, GlobalWalletState};
 
-fn parse_outpoints(outpoints: &[String]) -> Result<Vec<bitcoin::OutPoint>, AppError> {
+pub(crate) fn parse_outpoints(outpoints: &[String]) -> Result<Vec<bitcoin::OutPoint>, AppError> {
     outpoints
         .iter()
         .map(|s| {

@@ -5,6 +5,7 @@ import { formatSats } from "../utils/format";
 import { useWallet } from "../context/WalletContext";
 import { VtxoCard } from "../components/VtxoCard";
 import type { VtxoInfo } from "../components/VtxoCard";
+import SelectedCoinsSendDrawer from "../components/SelectedCoinsSendDrawer";
 
 interface FeeEstimate {
   fee_sat: number;
@@ -46,6 +47,9 @@ export function CoinsRoute() {
   const [feeEstimate, setFeeEstimate] = useState<FeeEstimate | null>(null);
   const [showRenewConfirm, setShowRenewConfirm] = useState(false);
   const [pendingRenewTargets, setPendingRenewTargets] = useState<VtxoInfo[] | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [sendDrawerOpen, setSendDrawerOpen] = useState(false);
 
   const loading = !vtxosLoaded;
 
@@ -77,6 +81,16 @@ export function CoinsRoute() {
   const recoverableVtxos = useMemo(
     () => vtxos.filter((v) => v.status === "recoverable"),
     [vtxos],
+  );
+
+  const selectedVtxos = useMemo(
+    () => vtxos.filter((v) => selectedKeys.has(`${v.txid}:${v.vout}`)),
+    [vtxos, selectedKeys],
+  );
+
+  const selectedTotalSat = useMemo(
+    () => selectedVtxos.reduce((sum, v) => sum + v.amount_sat, 0),
+    [selectedVtxos],
   );
 
   const startRenew = useCallback(async (targets: VtxoInfo[]) => {
@@ -144,6 +158,33 @@ export function CoinsRoute() {
     }
   }, [pendingRenewTargets, fetchVtxos, fetchData]);
 
+  const toggleSelectMode = useCallback(() => {
+    setExpandedId(null);
+    setShowRenewConfirm(false);
+    setPendingRenewTargets(null);
+    setSelectMode((on) => {
+      if (on) setSelectedKeys(new Set());
+      return !on;
+    });
+  }, []);
+
+  const toggleCoin = useCallback((key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const handleSendSuccess = useCallback(() => {
+    setSendDrawerOpen(false);
+    setSelectMode(false);
+    setSelectedKeys(new Set());
+    void fetchVtxos(true);
+    void fetchData();
+  }, [fetchVtxos, fetchData]);
+
   if (loading) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center p-8 theme-text">
@@ -160,30 +201,42 @@ export function CoinsRoute() {
     <main className="theme-text overflow-x-hidden" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <div className="flex items-center justify-between px-6 pt-4 pb-2">
         <h1 className="text-lg font-bold">Coins</h1>
-        <button
-          onClick={() => void fetchVtxos(true)}
-          disabled={refreshingVtxos}
-          className="rounded-full theme-card-elevated p-2 theme-text-secondary hover:opacity-80 transition-colors disabled:opacity-40"
-          title="Refresh"
-        >
-          <svg
-            className={`h-4 w-4 ${refreshingVtxos ? "animate-spin" : ""}`}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleSelectMode}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              selectMode
+                ? "theme-accent-bg"
+                : "theme-card-elevated theme-text-secondary"
+            }`}
           >
-            <polyline points="23 4 23 10 17 10" />
-            <polyline points="1 20 1 14 7 14" />
-            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-          </svg>
-        </button>
+            {selectMode ? "Cancel" : "Select"}
+          </button>
+          <button
+            onClick={() => void fetchVtxos(true)}
+            disabled={refreshingVtxos}
+            className="rounded-full theme-card-elevated p-2 theme-text-secondary hover:opacity-80 transition-colors disabled:opacity-40"
+            title="Refresh"
+          >
+            <svg
+              className={`h-4 w-4 ${refreshingVtxos ? "animate-spin" : ""}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Action buttons */}
-      {!showRenewConfirm && (expiringVtxos.length > 0 || recoverableVtxos.length > 0) && (
+      {!selectMode && !showRenewConfirm && (expiringVtxos.length > 0 || recoverableVtxos.length > 0) && (
         <div className="px-6 pb-3 space-y-2">
           {recoverableVtxos.length > 0 && (
             <button
@@ -207,7 +260,7 @@ export function CoinsRoute() {
       )}
 
       {/* Renew Confirmation */}
-      {showRenewConfirm && (
+      {!selectMode && showRenewConfirm && (
         <div className="mx-6 mb-3 rounded-2xl theme-warning-bg border theme-warning-border p-4">
           <p className="text-sm font-medium theme-warning mb-2">Renew VTXOs?</p>
           <p className="text-xs theme-text-secondary mb-1">
@@ -286,7 +339,7 @@ export function CoinsRoute() {
             </p>
           </div>
         ) : (
-          <div className="space-y-2 pb-4">
+          <div className={`space-y-2 ${selectMode ? "pb-32" : "pb-4"}`}>
             {filtered.map((vtxo) => {
               const key = `${vtxo.txid}:${vtxo.vout}`;
               return (
@@ -295,15 +348,49 @@ export function CoinsRoute() {
                   vtxo={vtxo}
                   now={nowSecs}
                   expanded={expandedId === key}
-                  canAct={!showRenewConfirm && !renewing}
+                  canAct={!selectMode && !showRenewConfirm && !renewing}
                   onToggle={() => setExpandedId(expandedId === key ? null : key)}
                   onAction={() => void startRenew([vtxo])}
+                  selectable={selectMode && vtxo.status !== "recoverable"}
+                  selected={selectedKeys.has(key)}
+                  onToggleSelect={() => toggleCoin(key)}
                 />
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Coin-control send footer — sits just above the bottom nav */}
+      {selectMode && (
+        <div
+          className="fixed inset-x-0 z-30 theme-drawer border-t theme-border px-6 py-3"
+          style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 64px)" }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs theme-text-muted">
+              {selectedVtxos.length} selected
+            </span>
+            <span className="text-sm font-semibold tabular-nums">
+              {formatSats(selectedTotalSat)} sats
+            </span>
+          </div>
+          <button
+            disabled={selectedVtxos.length === 0}
+            onClick={() => setSendDrawerOpen(true)}
+            className="w-full rounded-xl bg-lime-300 py-2.5 text-sm font-bold text-gray-900 active:scale-[0.98] transition-transform disabled:opacity-30 disabled:active:scale-100"
+          >
+            Send selected
+          </button>
+        </div>
+      )}
+
+      <SelectedCoinsSendDrawer
+        open={sendDrawerOpen}
+        onOpenChange={setSendDrawerOpen}
+        selectedVtxos={selectedVtxos}
+        onSuccess={handleSendSuccess}
+      />
     </main>
   );
 }

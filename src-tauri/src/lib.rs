@@ -334,6 +334,7 @@ pub fn run() {
             commands::send::detect_address_type,
             commands::send::send_lightning,
             commands::send::send_ark,
+            commands::send::send_ark_selected,
             commands::send::send_onchain,
             commands::send::estimate_onchain_send_fee,
             // PIN security
