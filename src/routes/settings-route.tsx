@@ -21,8 +21,10 @@ interface SettingsData {
   esplora_url: string | null;
 }
 
+// Blockstream is the default — an unset `esplora_url` resolves to this.
+const DEFAULT_EXPLORER_URL = "https://blockstream.info/api";
 const PRESET_EXPLORERS = [
-  { label: "Blockstream", url: "https://blockstream.info/api" },
+  { label: "Blockstream", url: DEFAULT_EXPLORER_URL },
   { label: "Mempool.space", url: "https://mempool.space/api" },
 ];
 const PRESET_URLS = new Set(PRESET_EXPLORERS.map((e) => e.url));
@@ -38,9 +40,12 @@ function EsploraSelector({
   saving: boolean;
   onSave: (url: string | null) => void;
 }) {
-  const isCustom = value !== "" && !PRESET_URLS.has(value);
-  // Blockstream is the default — saving it is equivalent to clearing
-  const urlToSave = value === "https://blockstream.info/api" || value === "" ? null : value;
+  // An unset value means "default", which is Blockstream — resolve it so a
+  // radio reflects the active explorer instead of showing nothing selected.
+  const effectiveValue = value === "" ? DEFAULT_EXPLORER_URL : value;
+  const isCustom = !PRESET_URLS.has(effectiveValue);
+  // Saving Blockstream (the default) is equivalent to clearing the override.
+  const urlToSave = effectiveValue === DEFAULT_EXPLORER_URL ? null : effectiveValue;
 
   return (
     <div className="rounded-2xl theme-card p-4 mt-3 space-y-3">
@@ -51,11 +56,11 @@ function EsploraSelector({
             key={option.url}
             onClick={() => onChange(option.url)}
             className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
-              value === option.url ? "theme-accent-bg" : "theme-card-elevated"
+              effectiveValue === option.url ? "theme-accent-bg" : "theme-card-elevated"
             }`}
           >
             <span className={`h-3 w-3 rounded-full border-2 shrink-0 ${
-              value === option.url ? "border-current bg-current" : "theme-border"
+              effectiveValue === option.url ? "border-current bg-current" : "theme-border"
             }`} />
             <span className="flex-1">
               <span className="font-medium">{option.label}</span>
