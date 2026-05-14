@@ -51,42 +51,78 @@ fn friendly_sync_error(raw: &str) -> String {
         "Onchain sync paused — rate limited by block explorer. Will retry automatically.".into()
     } else if lower.contains("timeout") || lower.contains("timed out") {
         "Onchain sync failed — request timed out. Will retry automatically.".into()
-    } else if lower.contains("connection") || lower.contains("dns") || lower.contains("resolve") {
+    } else if lower.contains("connection")
+        || lower.contains("dns")
+        || lower.contains("resolve")
+        || lower.contains("incompletemessage")
+        || lower.contains("incomplete message")
+        || lower.contains("reset by peer")
+        || lower.contains("ssl")
+        || lower.contains("tls")
+        || lower.contains("handshake")
+    {
         "Onchain sync failed — network error. Check your connection.".into()
     } else {
         "Onchain sync failed — will retry automatically.".into()
     }
 }
 
+/// Minimum interval between UI error notifications for consecutive sync failures.
+const ERROR_NOTIFY_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+
+/// Number of *consecutive* background sync failures before the first UI toast.
+///
+/// A single failure is almost always transient — the device went to sleep and
+/// the OS suspended the network/process, so the in-flight `wallet.sync()` fails
+/// once and then recovers on the next tick after wake. Surfacing a toast for
+/// that is pure noise. A sustained outage produces many consecutive failures
+/// and still gets reported, just a few backoff cycles later.
+const MIN_FAILURES_BEFORE_NOTIFY: u32 = 3;
+
+/// Whether a run of consecutive sync failures warrants a UI toast: the failure
+/// streak must be sustained *and* the per-notification cooldown must have
+/// elapsed. `since_last_notify` is `None` when no toast has fired yet.
+fn should_notify_sync_failure(
+    consecutive_failures: u32,
+    since_last_notify: Option<Duration>,
+) -> bool {
+    if consecutive_failures < MIN_FAILURES_BEFORE_NOTIFY {
+        return false;
+    }
+    since_last_notify
+        .map(|d| d >= ERROR_NOTIFY_COOLDOWN)
+        .unwrap_or(true)
+}
+
 /// Spawn a background task that periodically syncs the onchain wallet.
 ///
 /// Returns a `watch::Sender` whose drop signals the task to stop.
 ///
-/// The loop emits `wallet-sync-error` events to the UI, throttled to at most
-/// once per `ERROR_NOTIFY_COOLDOWN` of consecutive failures so the user stays
-/// informed without being spammed.
+/// The loop emits `wallet-sync-error` events to the UI, gated by
+/// `should_notify_sync_failure` so a lone device-sleep failure stays silent
+/// and sustained outages are still throttled to once per `ERROR_NOTIFY_COOLDOWN`.
 async fn spawn_onchain_sync(
     wallet: Arc<ark::ArkWallet>,
     app: &tauri::AppHandle,
 ) -> tokio::sync::watch::Sender<()> {
     use ark_client::wallet::OnchainWallet;
 
-    /// Minimum interval between UI error notifications for consecutive sync failures.
-    const ERROR_NOTIFY_COOLDOWN: Duration = Duration::from_secs(5 * 60);
     /// Maximum backoff interval after repeated sync failures.
     const MAX_SYNC_BACKOFF: Duration = Duration::from_secs(600);
 
-    if let Err(e) = wallet.sync().await {
+    let initial_failures = if let Err(e) = wallet.sync().await {
         warn!("initial onchain sync failed: {e}");
-        let _ = app.emit("wallet-sync-error", friendly_sync_error(&e.to_string()));
-    }
+        1
+    } else {
+        0
+    };
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(());
     let bg_wallet = Arc::clone(&wallet);
     let bg_app = app.clone();
     tokio::spawn(async move {
         let mut last_error_notify: Option<tokio::time::Instant> = None;
-        let mut consecutive_failures: u32 = 0;
+        let mut consecutive_failures: u32 = initial_failures;
 
         loop {
             let delay = if consecutive_failures == 0 {
@@ -119,9 +155,10 @@ async fn spawn_onchain_sync(
                         "background onchain sync failed: {e}"
                     );
 
-                    let should_notify = last_error_notify
-                        .map(|t| t.elapsed() >= ERROR_NOTIFY_COOLDOWN)
-                        .unwrap_or(true);
+                    let should_notify = should_notify_sync_failure(
+                        consecutive_failures,
+                        last_error_notify.map(|t| t.elapsed()),
+                    );
 
                     if should_notify {
                         let _ =
@@ -884,4 +921,93 @@ pub async fn get_receive_address(app: tauri::AppHandle) -> Result<ReceiveAddress
         ark_address: ark_addr.encode(),
         boarding_address: boarding_addr.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn friendly_sync_error_classifies_rate_limit() {
+        assert!(friendly_sync_error("HTTP 429 Too Many Requests").contains("rate limited"));
+    }
+
+    #[test]
+    fn friendly_sync_error_classifies_timeout() {
+        assert!(friendly_sync_error("operation timed out").contains("timed out"));
+    }
+
+    #[test]
+    fn friendly_sync_error_classifies_incomplete_message_as_network_error() {
+        // The dominant failure on hostile mobile networks — it must not fall
+        // through to the generic message.
+        let raw = "Reqwest(reqwest::Error { kind: Request, \
+                   source: hyper::Error(IncompleteMessage) })";
+        assert!(friendly_sync_error(raw).contains("network error"));
+    }
+
+    #[test]
+    fn friendly_sync_error_classifies_connection_reset_as_network_error() {
+        let raw = "Os { code: 104, kind: ConnectionReset, message: \"Connection reset by peer\" }";
+        assert!(friendly_sync_error(raw).contains("network error"));
+    }
+
+    #[test]
+    fn friendly_sync_error_classifies_dns_failure_as_network_error() {
+        let raw = "ConnectError(\"dns error\", \"failed to lookup address information\")";
+        assert!(friendly_sync_error(raw).contains("network error"));
+    }
+
+    #[test]
+    fn friendly_sync_error_classifies_tls_abort_as_network_error() {
+        assert!(
+            friendly_sync_error("Connect, Ssl(Error { code: ErrorCode(5) })")
+                .contains("network error")
+        );
+    }
+
+    #[test]
+    fn friendly_sync_error_falls_through_to_generic() {
+        let msg = friendly_sync_error("something totally unexpected");
+        assert!(msg.contains("will retry automatically"));
+        assert!(!msg.contains("network error"));
+    }
+
+    #[test]
+    fn lone_sync_failure_stays_silent() {
+        // A single failure is the device-sleep case — no toast.
+        assert!(!should_notify_sync_failure(1, None));
+        assert!(!should_notify_sync_failure(2, None));
+    }
+
+    #[test]
+    fn sustained_sync_failure_notifies_once_threshold_met() {
+        // First time the streak reaches the threshold, with no prior toast.
+        assert!(should_notify_sync_failure(MIN_FAILURES_BEFORE_NOTIFY, None));
+        assert!(should_notify_sync_failure(10, None));
+    }
+
+    #[test]
+    fn sync_failure_notify_respects_cooldown() {
+        // Streak is sustained, but a toast fired recently — stay quiet.
+        assert!(!should_notify_sync_failure(
+            10,
+            Some(ERROR_NOTIFY_COOLDOWN - Duration::from_secs(1))
+        ));
+        // Cooldown elapsed — notify again.
+        assert!(should_notify_sync_failure(10, Some(ERROR_NOTIFY_COOLDOWN)));
+        assert!(should_notify_sync_failure(
+            10,
+            Some(ERROR_NOTIFY_COOLDOWN + Duration::from_secs(60))
+        ));
+    }
+
+    #[test]
+    fn cooldown_does_not_rescue_a_sub_threshold_streak() {
+        // Even with the cooldown long elapsed, a short streak never notifies.
+        assert!(!should_notify_sync_failure(
+            1,
+            Some(ERROR_NOTIFY_COOLDOWN * 10)
+        ));
+    }
 }

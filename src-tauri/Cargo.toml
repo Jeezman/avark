@@ -71,6 +71,11 @@ keyring = { version = "3", features = ["sync-secret-service", "apple-native", "w
 jni = "0.21"
 ndk-context = "0.1"
 
+[dev-dependencies]
+# Async test harness for the esplora retry layer. The runtime/macros features
+# aren't needed at runtime — Tauri supplies the tokio runtime in production.
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+
 [features]
 vendored-openssl = ["dep:openssl"]
 

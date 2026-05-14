@@ -21,37 +21,66 @@ interface SettingsData {
   esplora_url: string | null;
 }
 
-// Blockstream is the default — an unset `esplora_url` resolves to this.
-const DEFAULT_EXPLORER_URL = "https://blockstream.info/api";
-const PRESET_EXPLORERS = [
-  { label: "Blockstream", url: DEFAULT_EXPLORER_URL },
-  { label: "Mempool.space", url: "https://mempool.space/api" },
-];
-const PRESET_URLS = new Set(PRESET_EXPLORERS.map((e) => e.url));
+function defaultExplorerForNetwork(network: string | null | undefined): {
+  label: string;
+  url: string;
+} {
+  switch (network?.toLowerCase()) {
+    case "testnet":
+      return { label: "Blockstream", url: "https://blockstream.info/testnet/api" };
+    case "signet":
+      return { label: "Mutinynet", url: "https://mutinynet.com/api" };
+    case "regtest":
+      return { label: "Local", url: "http://localhost:7070" };
+    case "bitcoin":
+    default:
+      return { label: "Blockstream", url: "https://blockstream.info/api" };
+  }
+}
+
+function mempoolExplorerForNetwork(network: string | null | undefined): string {
+  switch (network?.toLowerCase()) {
+    case "testnet":
+      return "https://mempool.space/testnet/api";
+    case "signet":
+      return "https://mempool.space/signet/api";
+    case "bitcoin":
+    default:
+      return "https://mempool.space/api";
+  }
+}
 
 function EsploraSelector({
   value,
+  network,
   onChange,
   saving,
   onSave,
 }: {
   value: string;
+  network: string | null | undefined;
   onChange: (v: string) => void;
   saving: boolean;
   onSave: (url: string | null) => void;
 }) {
-  // An unset value means "default", which is Blockstream — resolve it so a
-  // radio reflects the active explorer instead of showing nothing selected.
-  const effectiveValue = value === "" ? DEFAULT_EXPLORER_URL : value;
-  const isCustom = !PRESET_URLS.has(effectiveValue);
-  // Saving Blockstream (the default) is equivalent to clearing the override.
-  const urlToSave = effectiveValue === DEFAULT_EXPLORER_URL ? null : effectiveValue;
+  const defaultExplorer = defaultExplorerForNetwork(network);
+  const presetExplorers = [
+    defaultExplorer,
+    { label: "Mempool.space", url: mempoolExplorerForNetwork(network) },
+  ];
+  const presetUrls = new Set(presetExplorers.map((e) => e.url));
+  // An unset value means "network default" — resolve it so a radio reflects
+  // the active explorer instead of showing nothing selected.
+  const effectiveValue = value === "" ? defaultExplorer.url : value;
+  const isCustom = !presetUrls.has(effectiveValue);
+  // Saving the default is equivalent to clearing the override.
+  const urlToSave = effectiveValue === defaultExplorer.url ? null : effectiveValue;
 
   return (
     <div className="rounded-2xl theme-card p-4 mt-3 space-y-3">
       <p className="text-xs theme-text-muted mb-0.5">Block Explorer (Esplora)</p>
       <div className="space-y-1.5">
-        {PRESET_EXPLORERS.map((option) => (
+        {presetExplorers.map((option) => (
           <button
             key={option.url}
             onClick={() => onChange(option.url)}
@@ -807,6 +836,7 @@ export function SettingsRoute() {
         </div>
         <EsploraSelector
           value={esploraInput}
+          network={settings?.network}
           onChange={setEsploraInput}
           saving={savingEsplora}
           onSave={async (url) => {
