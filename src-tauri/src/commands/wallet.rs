@@ -6,6 +6,7 @@ use tauri::{Emitter, Manager};
 use tracing::{debug, info, warn};
 
 use super::lightning::{spawn_pending_swap_recovery, BOLTZ_URL};
+use super::recovery::spawn_unilateral_exit_cache_refresh;
 use crate::{
     ark, boarding_db_path, lendaswap_db_path, load_mnemonic, read_settings, secure_storage,
     store_mnemonic, swap_db_path, wallet, wallet_path, write_settings, AppError, AppWalletState,
@@ -13,12 +14,12 @@ use crate::{
 };
 
 #[derive(Debug, Serialize, serde::Deserialize)]
-struct WalletData {
-    asp_url: String,
-    network: String,
+pub(crate) struct WalletData {
+    pub(crate) asp_url: String,
+    pub(crate) network: String,
 }
 
-async fn read_wallet_data(app: &tauri::AppHandle) -> Result<WalletData, AppError> {
+pub(crate) async fn read_wallet_data(app: &tauri::AppHandle) -> Result<WalletData, AppError> {
     let path = wallet_path(app)?;
     let raw = tokio::fs::read_to_string(&path)
         .await
@@ -451,7 +452,7 @@ pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
     let key_provider_for_recovery = Arc::clone(&key_provider);
     let (wallet_cancel, cancel_rx) = tokio::sync::watch::channel(());
     *global.0.write().await = Some(AppWalletState {
-        client: client_arc,
+        client: Arc::clone(&client_arc),
         wallet: wallet_arc,
         swap_storage,
         key_provider,
@@ -466,6 +467,7 @@ pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
         &app,
         cancel_rx,
     );
+    spawn_unilateral_exit_cache_refresh(app.clone(), Arc::clone(&client_arc));
 
     info!("wallet connected successfully");
     Ok(())

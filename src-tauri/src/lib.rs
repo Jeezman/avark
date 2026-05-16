@@ -125,6 +125,10 @@ pub(crate) fn lendaswap_db_path(app: &tauri::AppHandle) -> Result<PathBuf, AppEr
     app_data_file(app, "lendaswap.db")
 }
 
+pub(crate) fn unilateral_exit_cache_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+    app_data_file(app, "unilateral_exit_cache.json")
+}
+
 pub(crate) const MNEMONIC_KEY: &str = "wallet-mnemonic";
 
 pub(crate) fn store_mnemonic(
@@ -296,6 +300,12 @@ pub fn run() {
             commands::settings::set_esplora_url,
             commands::settings::set_fiat_enabled,
             commands::settings::set_fiat_currency,
+            // Recovery package
+            commands::recovery::refresh_unilateral_exit_cache,
+            commands::recovery::get_unilateral_exit_cache_status,
+            commands::recovery::unilateral_exit_preflight,
+            commands::recovery::unilateral_exit_status,
+            commands::recovery::unilateral_exit_broadcast_next,
             // Wallet lifecycle
             commands::wallet::has_wallet,
             commands::wallet::create_wallet,

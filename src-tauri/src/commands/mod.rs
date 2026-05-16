@@ -4,6 +4,7 @@ pub mod lightning;
 pub mod nostr;
 pub mod pin;
 pub mod receive;
+pub mod recovery;
 pub mod send;
 pub mod settings;
 pub mod share;

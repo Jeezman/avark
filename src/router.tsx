@@ -10,6 +10,7 @@ import { SwapRoute } from "./routes/swap-route";
 import { SwapCheckoutRoute } from "./routes/swap-checkout-route";
 import { SwapHistoryRoute } from "./routes/swap-history-route";
 import { RecoverLnRoute } from "./routes/recover-ln-route";
+import { RecoveryRoute } from "./routes/recovery-route";
 import { ProfileRoute } from "./routes/profile-route";
 import { AppLayout } from "./components/AppLayout";
 
@@ -95,6 +96,12 @@ const recoverLnRoute = createRoute({
   component: RecoverLnRoute,
 });
 
+const recoveryRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: "/recover/exit",
+  component: RecoveryRoute,
+});
+
 const profileRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: "/profile",
@@ -112,6 +119,7 @@ const routeTree = rootRoute.addChildren([
     swapCheckoutRoute,
     swapHistoryRoute,
     recoverLnRoute,
+    recoveryRoute,
     profileRoute,
     settingsRoute,
   ]),

@@ -6,6 +6,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useTheme } from "../context/ThemeContext";
 import { PinSetupFlow, PinDisableFlow, usePinLock } from "../context/PinLockContext";
 import { useFiat } from "../context/FiatContext";
+import { useWallet } from "../context/WalletContext";
 import {
   AFRICAN_CURRENCY_CODES,
   formatFiat,
@@ -19,6 +20,40 @@ interface SettingsData {
   asp_url: string | null;
   network: string | null;
   esplora_url: string | null;
+}
+
+interface RecoveryCacheStatus {
+  exists: boolean;
+  generatedAt: number | null;
+  network: string | null;
+  branchCount: number;
+  txCount: number;
+  failedCount: number;
+  lastError: string | null;
+}
+
+function formatCacheTime(timestamp: number | null): string {
+  if (!timestamp) return "Never";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp * 1000));
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function defaultExplorerForNetwork(network: string | null | undefined): {
@@ -489,6 +524,7 @@ function FiatTickerCard({
 export function SettingsRoute() {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
+  const { connectionState } = useWallet();
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [seedStep, setSeedStep] = useState<"hidden" | "confirm" | "revealed">("hidden");
   const [mnemonic, setMnemonic] = useState<string | null>(null);
@@ -515,6 +551,8 @@ export function SettingsRoute() {
   const [nsec, setNsec] = useState<string | null>(null);
   const [loadingNsec, setLoadingNsec] = useState(false);
   const [confirmNsecInput, setConfirmNsecInput] = useState("");
+  const [recoveryCache, setRecoveryCache] = useState<RecoveryCacheStatus | null>(null);
+  const [refreshingRecoveryCache, setRefreshingRecoveryCache] = useState(false);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -531,6 +569,19 @@ export function SettingsRoute() {
   useEffect(() => {
     void fetchSettings();
   }, [fetchSettings]);
+
+  const fetchRecoveryCacheStatus = useCallback(async () => {
+    try {
+      const status = await invoke<RecoveryCacheStatus>("get_unilateral_exit_cache_status");
+      setRecoveryCache(status);
+    } catch (e) {
+      console.warn("Failed to load recovery cache status:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchRecoveryCacheStatus();
+  }, [fetchRecoveryCacheStatus]);
 
   useEffect(() => {
     invoke<{ max_attempts: number }>("get_pin_status")
@@ -602,6 +653,33 @@ export function SettingsRoute() {
       toast.error(typeof e === "string" ? e : "Failed to delete wallet");
       setDeleting(false);
       setShowDeleteConfirm(false);
+    }
+  };
+
+  const handleRefreshRecoveryCache = async () => {
+    setRefreshingRecoveryCache(true);
+    try {
+      const status = await withTimeout(
+        invoke<RecoveryCacheStatus>("refresh_unilateral_exit_cache"),
+        330_000,
+        "Recovery package refresh timed out. Try again when the ASP is responding.",
+      );
+      setRecoveryCache(status);
+      if (status.exists && status.failedCount > 0) {
+        toast.warning(`Recovery package partially refreshed; skipped ${status.failedCount} VTXO(s)`);
+      } else if (status.exists) {
+        toast.success("Recovery package refreshed");
+      } else {
+        toast.warning(
+          status.lastError
+            ? "ASP timed out while preparing recovery data"
+            : "No recovery data was cached",
+        );
+      }
+    } catch (e) {
+      toast.error(typeof e === "string" ? e : "Failed to refresh recovery package");
+    } finally {
+      setRefreshingRecoveryCache(false);
     }
   };
 
@@ -830,8 +908,14 @@ export function SettingsRoute() {
             <p className="text-sm">{settings?.network ?? "—"}</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-lime-400" />
-            <span className="text-xs theme-text-muted">Connected</span>
+            <span
+              className={`h-2 w-2 rounded-full ${
+                connectionState === "connected" ? "bg-lime-400" : "bg-yellow-400"
+              }`}
+            />
+            <span className="text-xs theme-text-muted">
+              {connectionState === "connected" ? "Connected" : "Offline"}
+            </span>
           </div>
         </div>
         <EsploraSelector
@@ -851,6 +935,56 @@ export function SettingsRoute() {
             }
           }}
         />
+        <div className="rounded-2xl theme-card p-4 mt-3 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold theme-text">Emergency exit package</p>
+              <p className="text-xs theme-text-muted mt-1">
+                Cached locally for ASP-independent recovery.
+              </p>
+            </div>
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                recoveryCache?.exists
+                  ? "theme-accent-bg"
+                  : "theme-warning-bg theme-warning"
+              }`}
+            >
+              {recoveryCache?.exists ? "Ready" : "Missing"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <p className="theme-text-muted mb-0.5">Last refreshed</p>
+              <p className="theme-text">{formatCacheTime(recoveryCache?.generatedAt ?? null)}</p>
+            </div>
+            <div>
+              <p className="theme-text-muted mb-0.5">Transactions</p>
+              <p className="theme-text tabular-nums">{recoveryCache?.txCount ?? 0}</p>
+            </div>
+          </div>
+          {(recoveryCache?.failedCount ?? 0) > 0 && (
+            <p className="rounded-xl theme-warning-bg px-3 py-2 text-xs theme-warning">
+              ASP timed out while preparing recovery data. No package was cached.
+            </p>
+          )}
+          <button
+            onClick={() => void handleRefreshRecoveryCache()}
+            disabled={refreshingRecoveryCache || connectionState !== "connected"}
+            className="w-full rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-bold text-gray-900 transition-colors hover:bg-lime-200 disabled:opacity-40"
+          >
+            {refreshingRecoveryCache ? "Refreshing..." : "Refresh recovery package"}
+          </button>
+          <Link
+            to="/recover/exit"
+            aria-disabled={!recoveryCache?.exists}
+            className={`block w-full rounded-xl theme-card-elevated px-4 py-2.5 text-center text-sm font-semibold theme-text transition-opacity ${
+              recoveryCache?.exists ? "hover:opacity-80" : "pointer-events-none opacity-40"
+            }`}
+          >
+            Broadcast emergency exit →
+          </Link>
+        </div>
       </div>
 
       {/* Identity */}
