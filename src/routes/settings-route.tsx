@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useTheme } from "../context/ThemeContext";
@@ -20,41 +21,75 @@ interface SettingsData {
   esplora_url: string | null;
 }
 
-const PRESET_EXPLORERS = [
-  { label: "Blockstream", url: "https://blockstream.info/api" },
-  { label: "Mempool.space", url: "https://mempool.space/api" },
-];
-const PRESET_URLS = new Set(PRESET_EXPLORERS.map((e) => e.url));
+function defaultExplorerForNetwork(network: string | null | undefined): {
+  label: string;
+  url: string;
+} {
+  switch (network?.toLowerCase()) {
+    case "testnet":
+      return { label: "Blockstream", url: "https://blockstream.info/testnet/api" };
+    case "signet":
+      return { label: "Mutinynet", url: "https://mutinynet.com/api" };
+    case "regtest":
+      return { label: "Local", url: "http://localhost:7070" };
+    case "bitcoin":
+    default:
+      return { label: "Blockstream", url: "https://blockstream.info/api" };
+  }
+}
+
+function mempoolExplorerForNetwork(network: string | null | undefined): string {
+  switch (network?.toLowerCase()) {
+    case "testnet":
+      return "https://mempool.space/testnet/api";
+    case "signet":
+      return "https://mempool.space/signet/api";
+    case "bitcoin":
+    default:
+      return "https://mempool.space/api";
+  }
+}
 
 function EsploraSelector({
   value,
+  network,
   onChange,
   saving,
   onSave,
 }: {
   value: string;
+  network: string | null | undefined;
   onChange: (v: string) => void;
   saving: boolean;
   onSave: (url: string | null) => void;
 }) {
-  const isCustom = value !== "" && !PRESET_URLS.has(value);
-  // Blockstream is the default — saving it is equivalent to clearing
-  const urlToSave = value === "https://blockstream.info/api" || value === "" ? null : value;
+  const defaultExplorer = defaultExplorerForNetwork(network);
+  const presetExplorers = [
+    defaultExplorer,
+    { label: "Mempool.space", url: mempoolExplorerForNetwork(network) },
+  ];
+  const presetUrls = new Set(presetExplorers.map((e) => e.url));
+  // An unset value means "network default" — resolve it so a radio reflects
+  // the active explorer instead of showing nothing selected.
+  const effectiveValue = value === "" ? defaultExplorer.url : value;
+  const isCustom = !presetUrls.has(effectiveValue);
+  // Saving the default is equivalent to clearing the override.
+  const urlToSave = effectiveValue === defaultExplorer.url ? null : effectiveValue;
 
   return (
     <div className="rounded-2xl theme-card p-4 mt-3 space-y-3">
       <p className="text-xs theme-text-muted mb-0.5">Block Explorer (Esplora)</p>
       <div className="space-y-1.5">
-        {PRESET_EXPLORERS.map((option) => (
+        {presetExplorers.map((option) => (
           <button
             key={option.url}
             onClick={() => onChange(option.url)}
             className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
-              value === option.url ? "theme-accent-bg" : "theme-card-elevated"
+              effectiveValue === option.url ? "theme-accent-bg" : "theme-card-elevated"
             }`}
           >
             <span className={`h-3 w-3 rounded-full border-2 shrink-0 ${
-              value === option.url ? "border-current bg-current" : "theme-border"
+              effectiveValue === option.url ? "border-current bg-current" : "theme-border"
             }`} />
             <span className="flex-1">
               <span className="font-medium">{option.label}</span>
@@ -475,6 +510,7 @@ export function SettingsRoute() {
   } = useFiat();
   const [pinFlow, setPinFlow] = useState<"none" | "setup" | "disable">("none");
   const [maxAttempts, setMaxAttempts] = useState(10);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [nsecStep, setNsecStep] = useState<"hidden" | "confirm" | "revealed">("hidden");
   const [nsec, setNsec] = useState<string | null>(null);
   const [loadingNsec, setLoadingNsec] = useState(false);
@@ -501,6 +537,12 @@ export function SettingsRoute() {
       .then((s) => setMaxAttempts(s.max_attempts))
       .catch(() => {});
   }, [pinEnabled]);
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
 
   const handleRevealSeed = async () => {
     if (mnemonic) {
@@ -794,6 +836,7 @@ export function SettingsRoute() {
         </div>
         <EsploraSelector
           value={esploraInput}
+          network={settings?.network}
           onChange={setEsploraInput}
           saving={savingEsplora}
           onSave={async (url) => {
@@ -958,7 +1001,9 @@ export function SettingsRoute() {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm theme-text-secondary">Version</span>
-            <span className="text-sm font-mono theme-text-muted">0.1.0</span>
+            <span className="text-sm font-mono theme-text-muted">
+              {appVersion ?? "—"}
+            </span>
           </div>
         </div>
       </div>

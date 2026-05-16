@@ -6,7 +6,16 @@ use esplora_client::OutputStatus;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::RwLock;
+use std::time::Duration;
 use zeroize::Zeroize;
+
+/// Total attempts (first try included) for a transient esplora request.
+const ESPLORA_MAX_ATTEMPTS: usize = 3;
+/// Backoff before the first retry; doubles for each subsequent retry.
+const ESPLORA_RETRY_BASE_DELAY: Duration = Duration::from_millis(300);
+/// Socket timeout for esplora HTTP requests. Without it a stalled connection
+/// hangs an entire sync cycle indefinitely.
+const ESPLORA_TIMEOUT_SECS: u64 = 30;
 
 pub struct EsploraBlockchain {
     client: esplora_client::AsyncClient,
@@ -14,17 +23,73 @@ pub struct EsploraBlockchain {
 
 impl EsploraBlockchain {
     pub fn new(url: &str) -> Result<Self, esplora_client::Error> {
-        let client = esplora_client::Builder::new(url).build_async_with_sleeper()?;
+        let client = esplora_client::Builder::new(url)
+            .timeout(ESPLORA_TIMEOUT_SECS)
+            .build_async_with_sleeper()?;
         Ok(Self { client })
     }
+}
+
+/// Whether an esplora error is a transport-level failure worth retrying.
+///
+/// `Reqwest` covers connection resets, incomplete responses, mid-handshake TLS
+/// aborts and sporadic DNS failures — rampant on hostile mobile networks and
+/// almost always gone on the next attempt. `HttpResponse` is deliberately
+/// excluded: esplora-client already retries 429/500/503 internally, and other
+/// status codes are not transient.
+fn is_transient_esplora_error(e: &esplora_client::Error) -> bool {
+    matches!(e, esplora_client::Error::Reqwest(_))
+}
+
+/// Retry an idempotent async operation while `is_transient` keeps returning
+/// true, up to `max_attempts` total, with exponential backoff from `base_delay`.
+async fn retry_transient<T, E, F, Fut>(
+    max_attempts: usize,
+    base_delay: Duration,
+    is_transient: impl Fn(&E) -> bool,
+    mut op: F,
+) -> Result<T, E>
+where
+    E: std::fmt::Display,
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+{
+    let mut attempt = 1usize;
+    loop {
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(e) if attempt < max_attempts && is_transient(&e) => {
+                let delay = base_delay * 2u32.pow((attempt - 1) as u32);
+                tracing::debug!(attempt, %e, "transient esplora error; retrying after {delay:?}");
+                tokio::time::sleep(delay).await;
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// [`retry_transient`] specialized for esplora reads. Never use this for
+/// `broadcast`: a lost response on an already-accepted submission would re-POST
+/// the transaction and surface a spurious "already known" error.
+async fn esplora_retry<T, F, Fut>(op: F) -> Result<T, esplora_client::Error>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, esplora_client::Error>>,
+{
+    retry_transient(
+        ESPLORA_MAX_ATTEMPTS,
+        ESPLORA_RETRY_BASE_DELAY,
+        is_transient_esplora_error,
+        op,
+    )
+    .await
 }
 
 impl Blockchain for EsploraBlockchain {
     async fn find_outpoints(&self, address: &Address) -> Result<Vec<ExplorerUtxo>, Error> {
         let script_pubkey = address.script_pubkey();
-        let txs = self
-            .client
-            .scripthash_txs(&script_pubkey, None)
+        let txs = esplora_retry(|| self.client.scripthash_txs(&script_pubkey, None))
             .await
             .map_err(Error::consumer)?;
 
@@ -51,11 +116,12 @@ impl Blockchain for EsploraBlockchain {
 
         let mut utxos = Vec::with_capacity(candidates.len());
         for output in candidates {
-            let status = self
-                .client
-                .get_output_status(&output.outpoint.txid, output.outpoint.vout as u64)
-                .await
-                .map_err(Error::consumer)?;
+            let status = esplora_retry(|| {
+                self.client
+                    .get_output_status(&output.outpoint.txid, output.outpoint.vout as u64)
+            })
+            .await
+            .map_err(Error::consumer)?;
 
             utxos.push(match status {
                 Some(OutputStatus { spent: true, .. }) => ExplorerUtxo {
@@ -70,13 +136,13 @@ impl Blockchain for EsploraBlockchain {
     }
 
     async fn find_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        self.client.get_tx(txid).await.map_err(Error::consumer)
+        esplora_retry(|| self.client.get_tx(txid))
+            .await
+            .map_err(Error::consumer)
     }
 
     async fn get_tx_status(&self, txid: &Txid) -> Result<TxStatus, Error> {
-        let info = self
-            .client
-            .get_tx_info(txid)
+        let info = esplora_retry(|| self.client.get_tx_info(txid))
             .await
             .map_err(Error::consumer)?;
 
@@ -86,9 +152,7 @@ impl Blockchain for EsploraBlockchain {
     }
 
     async fn get_output_status(&self, txid: &Txid, vout: u32) -> Result<SpendStatus, Error> {
-        let status = self
-            .client
-            .get_output_status(txid, vout as u64)
+        let status = esplora_retry(|| self.client.get_output_status(txid, vout as u64))
             .await
             .map_err(Error::consumer)?;
 
@@ -102,9 +166,7 @@ impl Blockchain for EsploraBlockchain {
     }
 
     async fn get_fee_rate(&self) -> Result<f64, Error> {
-        let estimates = self
-            .client
-            .get_fee_estimates()
+        let estimates = esplora_retry(|| self.client.get_fee_estimates())
             .await
             .map_err(Error::consumer)?;
         // Target ~6 blocks confirmation, fall back to 1.0 sat/vB
@@ -647,5 +709,92 @@ mod tests {
     #[test]
     fn esplora_url_empty_custom_uses_default() {
         assert!(esplora_url(bitcoin::Network::Bitcoin, Some("")).contains("blockstream.info"));
+    }
+
+    #[test]
+    fn http_response_errors_are_not_transient() {
+        // esplora-client already retries 429/500/503 internally — re-retrying
+        // here would just double the load. Other status codes aren't transient.
+        let e = esplora_client::Error::HttpResponse {
+            status: 503,
+            message: "service unavailable".into(),
+        };
+        assert!(!is_transient_esplora_error(&e));
+    }
+
+    #[tokio::test]
+    async fn retry_transient_succeeds_without_retrying() {
+        let attempts = std::cell::Cell::new(0);
+        let result: Result<&str, String> = retry_transient(
+            3,
+            Duration::ZERO,
+            |_| true,
+            || {
+                attempts.set(attempts.get() + 1);
+                async { Ok("ok") }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap(), "ok");
+        assert_eq!(attempts.get(), 1, "a first-try success must not retry");
+    }
+
+    #[tokio::test]
+    async fn retry_transient_recovers_after_transient_failures() {
+        let attempts = std::cell::Cell::new(0);
+        let result: Result<&str, String> = retry_transient(
+            3,
+            Duration::ZERO,
+            |_| true,
+            || {
+                let n = attempts.get() + 1;
+                attempts.set(n);
+                async move {
+                    if n < 3 {
+                        Err(format!("transient {n}"))
+                    } else {
+                        Ok("recovered")
+                    }
+                }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap(), "recovered");
+        assert_eq!(attempts.get(), 3);
+    }
+
+    #[tokio::test]
+    async fn retry_transient_stops_at_max_attempts() {
+        let attempts = std::cell::Cell::new(0);
+        let result: Result<&str, String> = retry_transient(
+            3,
+            Duration::ZERO,
+            |_| true,
+            || {
+                let n = attempts.get() + 1;
+                attempts.set(n);
+                async move { Err(format!("fail {n}")) }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap_err(), "fail 3");
+        assert_eq!(attempts.get(), 3, "must give up after max_attempts");
+    }
+
+    #[tokio::test]
+    async fn retry_transient_does_not_retry_non_transient_errors() {
+        let attempts = std::cell::Cell::new(0);
+        let result: Result<&str, String> = retry_transient(
+            3,
+            Duration::ZERO,
+            |_| false,
+            || {
+                attempts.set(attempts.get() + 1);
+                async { Err("permanent".to_string()) }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap_err(), "permanent");
+        assert_eq!(attempts.get(), 1, "non-transient errors fail immediately");
     }
 }

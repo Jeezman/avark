@@ -137,6 +137,24 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
+      # Vite inlines VITE_* at build time — an empty value silently bakes a
+      # broken config into the signed APK with a fully green pipeline. Fail
+      # loudly here instead. These are repo Variables (Settings → Secrets and
+      # variables → Actions → Variables), not Secrets — `vars.*` only sees
+      # the Variables tab.
+      - name: Verify release build env is populated
+        env:
+          VITE_WALLETCONNECT_PROJECT_ID: ${{ vars.VITE_WALLETCONNECT_PROJECT_ID }}
+          VITE_DEFAULT_ASP_URL: ${{ vars.VITE_DEFAULT_ASP_URL }}
+        run: |
+          missing=()
+          [ -n "$VITE_WALLETCONNECT_PROJECT_ID" ] || missing+=(VITE_WALLETCONNECT_PROJECT_ID)
+          [ -n "$VITE_DEFAULT_ASP_URL" ] || missing+=(VITE_DEFAULT_ASP_URL)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Release build env vars are empty: ${missing[*]}. Add them in repo Settings → Secrets and variables → Actions → Variables tab (not Secrets — vars.* can't read Secrets)."
+            exit 1
+          fi
+
       - name: Write release keystore
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

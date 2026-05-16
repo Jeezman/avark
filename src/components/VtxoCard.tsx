@@ -46,6 +46,9 @@ interface VtxoCardProps {
   canAct: boolean;
   onToggle: () => void;
   onAction: () => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }
 
 export const VtxoCard = memo(function VtxoCard({
@@ -55,19 +58,32 @@ export const VtxoCard = memo(function VtxoCard({
   canAct,
   onToggle,
   onAction,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: VtxoCardProps) {
   const expired = vtxo.expires_at < now;
   const expiring = (vtxo.expires_at - now) / 3600 < 72;
   const isRecoverable = vtxo.status === "recoverable";
-  const showAction = canAct && (isRecoverable || expiring);
+  // No renew/recover affordance while picking coins — it would just be noise.
+  const showAction = canAct && !selectable && (isRecoverable || expiring);
 
   return (
     <div
-      className={`rounded-xl theme-card px-4 py-3 cursor-pointer transition-colors ${expired ? "opacity-50" : ""}`}
-      onClick={onToggle}
+      className={`rounded-xl px-4 py-3 cursor-pointer transition-colors ${
+        selectable && selected ? "theme-card-elevated" : "theme-card"
+      } ${expired ? "opacity-50" : ""}`}
+      onClick={selectable ? onToggleSelect : onToggle}
     >
       <div className="flex items-center justify-between">
-        <div className="min-w-0">
+        {selectable && (
+          <span
+            className={`mr-3 h-4 w-4 shrink-0 rounded border-2 transition-colors ${
+              selected ? "border-current bg-current theme-accent" : "theme-border"
+            }`}
+          />
+        )}
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold tabular-nums">
               {formatSats(vtxo.amount_sat)}{" "}
@@ -106,7 +122,7 @@ export const VtxoCard = memo(function VtxoCard({
           )}
         </div>
       </div>
-      {expanded && (
+      {expanded && !selectable && (
         <div className="mt-2 pt-2 border-t theme-border overflow-hidden">
           <div className="space-y-2 text-[10px]">
             <div>
