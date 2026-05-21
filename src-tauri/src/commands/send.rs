@@ -189,7 +189,7 @@ pub async fn send_lightning(
     };
 
     match wait_result {
-        Ok(Ok(())) => {
+        Ok(Ok(_preimage)) => {
             info!(swap_id = %result.swap_id, txid = %result.txid, "Lightning invoice paid");
             Ok(SendResult {
                 txid: result.txid.to_string(),
@@ -246,12 +246,78 @@ pub async fn send_ark(
 
     info!(address = %address, amount_sat = amount_sat, "sending Ark payment");
 
+    // v0.9.0 replaced `send_vtxo(addr, amount)` with `send(Vec<SendReceiver>)`
+    // — the new shape accommodates multi-receiver + asset transfers. For our
+    // single-bitcoin-receiver case, `SendReceiver::bitcoin` is the convenience
+    // constructor.
     let txid = client
-        .send_vtxo(ark_addr, amount)
+        .send(vec![ark_core::send::SendReceiver::bitcoin(
+            ark_addr, amount,
+        )])
         .await
         .map_err(|e| AppError::Wallet(format!("Send failed: {e}")))?;
 
     info!(txid = %txid, "Ark payment sent");
+
+    Ok(SendResult {
+        txid: txid.to_string(),
+        pending_ln_swap_id: None,
+    })
+}
+
+/// Send an Ark payment spending **only** the named VTXO outpoints, bypassing
+/// automatic coin selection.
+///
+/// `send_ark` lets the SDK pick VTXOs automatically. That breaks once the
+/// wallet holds an asset-carrying VTXO: the asset-blind SDK builds a plain-BTC
+/// tx with no asset packet and the ASP rejects it (`T_VALIDATION_FAILED`).
+/// Naming the exact coins to spend lets the caller exclude the asset VTXO.
+#[tauri::command]
+pub async fn send_ark_selected(
+    app: tauri::AppHandle,
+    address: String,
+    amount_sat: u64,
+    outpoints: Vec<String>,
+) -> Result<SendResult, AppError> {
+    if amount_sat == 0 {
+        return Err(AppError::Wallet("Amount must be greater than zero".into()));
+    }
+    if outpoints.is_empty() {
+        return Err(AppError::Wallet("Select at least one coin to spend".into()));
+    }
+
+    let client = {
+        let state = app.state::<GlobalWalletState>();
+        let guard = state.0.read().await;
+        let ws = guard
+            .as_ref()
+            .ok_or_else(|| AppError::Wallet("Wallet not connected".into()))?;
+        Arc::clone(&ws.client)
+    };
+
+    let ark_addr = ark_core::ArkAddress::decode(&address)
+        .map_err(|e| AppError::Wallet(format!("Invalid Ark address: {e}")))?;
+    let vtxo_outpoints = super::coins::parse_outpoints(&outpoints)?;
+    let amount = bitcoin::Amount::from_sat(amount_sat);
+
+    info!(
+        address = %address,
+        amount_sat = amount_sat,
+        coins = vtxo_outpoints.len(),
+        "sending Ark payment with explicit VTXO selection"
+    );
+
+    // v0.9.0: `send_vtxo_selection(outpoints, addr, amount)` →
+    // `send_selection(outpoints, Vec<SendReceiver>)`.
+    let txid = client
+        .send_selection(
+            &vtxo_outpoints,
+            vec![ark_core::send::SendReceiver::bitcoin(ark_addr, amount)],
+        )
+        .await
+        .map_err(|e| AppError::Wallet(format!("Send failed: {e}")))?;
+
+    info!(txid = %txid, "Ark payment sent (selected coins)");
 
     Ok(SendResult {
         txid: txid.to_string(),

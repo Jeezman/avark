@@ -11,6 +11,7 @@ import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import type { VtxoInfo } from "../components/VtxoCard";
 import { formatSats } from "../utils/format";
+import { advanceFailureStreak } from "../utils/fetchFailureStreak";
 
 export type ConnectionState =
   | "checking"
@@ -18,6 +19,8 @@ export type ConnectionState =
   | "loading"
   | "connected"
   | "error";
+
+type FetchMode = "initial" | "manual" | "auto";
 
 export interface WalletBalance {
   onchain_confirmed_sat: number;
@@ -96,9 +99,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const lastVtxosFetchRef = useRef(0);
   const cancelledRef = useRef(false);
   const fetchIdRef = useRef(0);
+  const autoFailureStreakRef = useRef(0);
 
   const fetchData = useCallback(
-    async (initial?: boolean) => {
+    async (mode: FetchMode = "auto") => {
       const id = ++fetchIdRef.current;
       setRefreshing(true);
       try {
@@ -109,25 +113,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         ]);
         if (cancelledRef.current || id !== fetchIdRef.current) return;
 
-        if (balResult.status === "fulfilled") {
-          setBalance(balResult.value);
-        } else if (!initial) {
-          toast.error("Failed to fetch balance");
-        }
+        if (balResult.status === "fulfilled") setBalance(balResult.value);
+        if (txsResult.status === "fulfilled") setTransactions(txsResult.value);
+        setSwaps(swapsResult.status === "fulfilled" ? swapsResult.value : []);
 
-        if (txsResult.status === "fulfilled") {
-          setTransactions(txsResult.value);
-        } else if (!initial) {
-          toast.error("Failed to fetch transactions");
-        }
+        const balFailed = balResult.status === "rejected";
+        const txsFailed = txsResult.status === "rejected";
 
-        setSwaps(
-          swapsResult.status === "fulfilled" ? swapsResult.value : [],
-        );
-
-        if (initial) {
-          // Only block initial load if balance fails — that's the critical data.
-          // Transactions and swaps failing is non-fatal.
+        if (mode === "initial") {
+          // Only block initial load if balance fails — that's the critical
+          // data. Transactions and swaps failing is non-fatal.
           if (balResult.status === "rejected") {
             const message =
               typeof balResult.reason === "string"
@@ -138,17 +133,45 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           } else {
             setConnectionState("connected");
           }
+          return;
+        }
+
+        // A clean poll (any mode) ends an outage streak.
+        if (!balFailed && !txsFailed) {
+          autoFailureStreakRef.current = 0;
+        }
+
+        if (mode === "manual") {
+          // The user explicitly tapped refresh — report each failure now.
+          if (balFailed) toast.error("Failed to fetch balance");
+          if (txsFailed) toast.error("Failed to fetch transactions");
+          return;
+        }
+
+        // mode === "auto": a lone failed poll is almost always transient
+        // (device asleep, brief network drop). Toast only once the failure
+        // streak is sustained — see advanceFailureStreak.
+        if (balFailed || txsFailed) {
+          const { streak, shouldToast } = advanceFailureStreak(
+            autoFailureStreakRef.current,
+          );
+          autoFailureStreakRef.current = streak;
+          if (shouldToast) {
+            toast.error("Couldn't refresh wallet data — will retry automatically");
+          }
         }
       } catch (error) {
         if (cancelledRef.current || id !== fetchIdRef.current) return;
         const message =
           typeof error === "string" ? error : "Failed to fetch wallet data";
-        if (initial) {
+        if (mode === "initial") {
           setConnectionError(message);
           setConnectionState("error");
-        } else {
+        } else if (mode === "manual") {
           toast.error(message);
         }
+        // mode === "auto": swallow — Promise.allSettled never rejects, so this
+        // branch is unreachable for the invoke calls anyway.
       } finally {
         if (!cancelledRef.current && id === fetchIdRef.current) {
           setRefreshing(false);
@@ -189,7 +212,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
         if (loaded) {
           setConnectionState("loading");
-          void fetchData(true);
+          void fetchData("initial");
           return;
         }
 
@@ -199,7 +222,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           .then(() => {
             if (!cancelledRef.current) {
               setConnectionState("loading");
-              void fetchData(true);
+              void fetchData("initial");
             }
           })
           .catch((error) => {
@@ -244,7 +267,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         toast.success(
           `Received ${formatSats(event.payload.amount_sat)} sats`,
         );
-        setTimeout(() => void fetchData(), 1500);
+        setTimeout(() => void fetchData("auto"), 1500);
       }),
       listen<string>("ln-swap-error", (event) => {
         toast.error(event.payload);
@@ -266,7 +289,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const poll = () => {
       timer = setTimeout(() => {
         if (cancelled) return;
-        fetchData().finally(() => {
+        fetchData("auto").finally(() => {
           if (!cancelled) poll();
         });
       }, DEFAULT_REFRESH_INTERVAL);
@@ -289,7 +312,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         refreshing,
         autoRefresh,
         setAutoRefresh,
-        fetchData: () => fetchData(),
+        fetchData: () => fetchData("manual"),
         connectWallet,
         vtxos,
         vtxosLoaded,
