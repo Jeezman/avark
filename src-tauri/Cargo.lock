@@ -94,8 +94,8 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "ark-bdk-wallet"
-version = "0.7.0"
-source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.8.0#593b5439669e140cf48dbe5ce7c1348253e5e2e9"
+version = "0.9.0"
+source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.9.0#887cb4a1c87124594c13b4d2a1ffc1c7d89934fc"
 dependencies = [
  "anyhow",
  "ark-client",
@@ -113,10 +113,11 @@ dependencies = [
 
 [[package]]
 name = "ark-client"
-version = "0.7.0"
-source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.8.0#593b5439669e140cf48dbe5ce7c1348253e5e2e9"
+version = "0.9.0"
+source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.9.0#887cb4a1c87124594c13b4d2a1ffc1c7d89934fc"
 dependencies = [
  "ark-core",
+ "ark-delegator",
  "ark-fees",
  "ark-grpc",
  "async-stream",
@@ -151,8 +152,8 @@ dependencies = [
 
 [[package]]
 name = "ark-core"
-version = "0.7.0"
-source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.8.0#593b5439669e140cf48dbe5ce7c1348253e5e2e9"
+version = "0.9.0"
+source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.9.0#887cb4a1c87124594c13b4d2a1ffc1c7d89934fc"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -171,17 +172,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-delegator"
+version = "0.9.0"
+source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.9.0#887cb4a1c87124594c13b4d2a1ffc1c7d89934fc"
+dependencies = [
+ "ark-core",
+ "bitcoin",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "ark-fees"
-version = "0.7.0"
-source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.8.0#593b5439669e140cf48dbe5ce7c1348253e5e2e9"
+version = "0.9.0"
+source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.9.0#887cb4a1c87124594c13b4d2a1ffc1c7d89934fc"
 dependencies = [
  "cel",
 ]
 
 [[package]]
 name = "ark-grpc"
-version = "0.7.0"
-source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.8.0#593b5439669e140cf48dbe5ce7c1348253e5e2e9"
+version = "0.9.0"
+source = "git+https://github.com/arkade-os/rust-sdk.git?tag=v0.9.0#887cb4a1c87124594c13b4d2a1ffc1c7d89934fc"
 dependencies = [
  "ark-core",
  "async-stream",

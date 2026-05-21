@@ -31,10 +31,10 @@ thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false, features = ["sync", "fs", "time"] }
 
 # Ark protocol
-ark-client = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0", default-features = false, features = ["tls-webpki-roots", "sqlite"] }
-ark-core = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
-ark-bdk-wallet = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
-ark-grpc = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.8.0" }
+ark-client = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.0", default-features = false, features = ["tls-webpki-roots", "sqlite"] }
+ark-core = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.0" }
+ark-bdk-wallet = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.0" }
+ark-grpc = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.0" }
 
 # Bitcoin / BIP39
 bip39 = { version = "2", features = ["rand", "zeroize"] }

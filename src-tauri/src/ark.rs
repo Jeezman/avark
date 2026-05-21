@@ -109,6 +109,14 @@ impl Blockchain for EsploraBlockchain {
                         },
                         amount: Amount::from_sat(v.value),
                         confirmation_blocktime: block_time,
+                        // v0.9.0 added this field for block-based unilateral
+                        // exit delay support. We don't currently surface
+                        // confirmation count from esplora here — `0` is safe
+                        // for time-based exit delays (the only kind avark
+                        // currently exits against). If we ever need to
+                        // support block-based exit-delay ASPs, fetch the
+                        // chain tip and compute `tip_height - block_height + 1`.
+                        confirmations: 0,
                         is_spent: false,
                     })
             })

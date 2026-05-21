@@ -189,7 +189,7 @@ pub async fn send_lightning(
     };
 
     match wait_result {
-        Ok(Ok(())) => {
+        Ok(Ok(_preimage)) => {
             info!(swap_id = %result.swap_id, txid = %result.txid, "Lightning invoice paid");
             Ok(SendResult {
                 txid: result.txid.to_string(),
@@ -246,8 +246,14 @@ pub async fn send_ark(
 
     info!(address = %address, amount_sat = amount_sat, "sending Ark payment");
 
+    // v0.9.0 replaced `send_vtxo(addr, amount)` with `send(Vec<SendReceiver>)`
+    // — the new shape accommodates multi-receiver + asset transfers. For our
+    // single-bitcoin-receiver case, `SendReceiver::bitcoin` is the convenience
+    // constructor.
     let txid = client
-        .send_vtxo(ark_addr, amount)
+        .send(vec![ark_core::send::SendReceiver::bitcoin(
+            ark_addr, amount,
+        )])
         .await
         .map_err(|e| AppError::Wallet(format!("Send failed: {e}")))?;
 
@@ -301,8 +307,13 @@ pub async fn send_ark_selected(
         "sending Ark payment with explicit VTXO selection"
     );
 
+    // v0.9.0: `send_vtxo_selection(outpoints, addr, amount)` →
+    // `send_selection(outpoints, Vec<SendReceiver>)`.
     let txid = client
-        .send_vtxo_selection(&vtxo_outpoints, ark_addr, amount)
+        .send_selection(
+            &vtxo_outpoints,
+            vec![ark_core::send::SendReceiver::bitcoin(ark_addr, amount)],
+        )
         .await
         .map_err(|e| AppError::Wallet(format!("Send failed: {e}")))?;
 

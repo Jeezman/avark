@@ -196,6 +196,7 @@ mod tests {
             commitment_txids: vec![],
             settled_by: None,
             ark_txid: None,
+            assets: vec![],
         }
     }
 

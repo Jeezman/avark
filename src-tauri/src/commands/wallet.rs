@@ -254,6 +254,10 @@ async fn build_ark_client(
         Arc::clone(&swap_storage),
         BOLTZ_URL.to_string(),
         Duration::from_secs(30),
+        // v0.9.0 added 3rd-party delegator support. We don't use it —
+        // `None` + `vec![]` preserves the v0.8.0 "no delegator" behavior.
+        None,
+        vec![],
     );
 
     let client = offline_client
