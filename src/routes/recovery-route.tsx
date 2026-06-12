@@ -2,7 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { formatSats } from "../utils/format";
+import {
+  BranchesSkeleton,
+  PreflightSkeleton,
+  Skeleton,
+  SweepSkeleton,
+} from "../components/recovery/Skeleton";
+import { SweepForm, type UnrolledVtxoMaturity } from "../components/recovery/SweepForm";
+import { formatCountdown, formatSats, shortTxid } from "../utils/format";
 
 interface PreflightStatus {
   ready: boolean;
@@ -21,10 +28,19 @@ interface ExitBranchStatus {
   branchIndex: number;
   txs: ExitTxStatus[];
   nextPendingIndex: number | null;
+  sourceOutpoint: string | null;
+  sourceAmountSat: number | null;
 }
 
 interface UnilateralExitStatus {
   branches: ExitBranchStatus[];
+}
+
+interface ExitSweepStatus {
+  csvDelaySeconds: number;
+  now: number;
+  dustSat: number;
+  vtxos: UnrolledVtxoMaturity[];
 }
 
 interface BroadcastOutcome {
@@ -37,25 +53,25 @@ interface BroadcastOutcome {
 
 const POLL_INTERVAL_MS = 30_000;
 
-function shortTxid(txid: string): string {
-  if (txid.length <= 16) return txid;
-  return `${txid.slice(0, 8)}…${txid.slice(-6)}`;
-}
-
-/// Caption shown under a disabled "Broadcast next" button so the next action
-/// is glanceable. Returns `null` when the button is enabled or busy.
 function disabledHint(pf: PreflightStatus | null, busy: boolean): string | null {
   if (busy || !pf || pf.ready) return null;
   if (pf.onchainBalanceSat === 0) {
+    if (pf.onchainPendingSat > 0) {
+      return "Waiting for your pending onchain change to confirm (~1 block).";
+    }
     return "Send plain-onchain sats to the address above to enable.";
   }
   return "Resolve the pre-flight blockers above to enable.";
 }
 
+function formatExitDelay(secs: number): string {
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  const h = secs / 3600;
+  if (h < 48) return `${Math.round(h)}h`;
+  return `${Math.round(h / 24)}d`;
+}
+
 async function shareAddress(address: string) {
-  // iOS WKWebView exposes navigator.share; Android WebView does not, so we
-  // fall back to a Tauri command that fires an ACTION_SEND intent. Same
-  // pattern as ReceiveSheet.
   if (navigator.share) {
     try {
       await navigator.share({ title: "Plain onchain address", text: address });
@@ -74,8 +90,11 @@ async function shareAddress(address: string) {
 export function RecoveryRoute() {
   const [preflight, setPreflight] = useState<PreflightStatus | null>(null);
   const [status, setStatus] = useState<UnilateralExitStatus | null>(null);
+  const [sweep, setSweep] = useState<ExitSweepStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [sweepLoading, setSweepLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<number | null>(null);
   const [confirmation, setConfirmation] = useState<{
@@ -88,35 +107,59 @@ export function RecoveryRoute() {
     if (showLoading) setLoading(true);
     else setRefreshing(true);
     setLoadError(null);
+
     try {
       const pf = await invoke<PreflightStatus>("unilateral_exit_preflight");
       if (cancelledRef.current) return;
       setPreflight(pf);
-
-      // Always try to load status — it's a pure esplora query and only needs
-      // the cache + offline ctx to build, both of which preflight reports on
-      // separately. Blockers like "no onchain BTC" gate the broadcast action,
-      // not the *display* of what's in the package.
-      try {
-        const st = await invoke<UnilateralExitStatus>("unilateral_exit_status");
-        if (cancelledRef.current) return;
-        setStatus(st);
-      } catch (e) {
-        if (cancelledRef.current) return;
-        const msg = typeof e === "string" ? e : (e instanceof Error ? e.message : String(e));
-        console.warn("unilateral_exit_status failed:", msg);
-        setStatus(null);
-      }
     } catch (e) {
       if (cancelledRef.current) return;
       const msg = typeof e === "string" ? e : (e instanceof Error ? e.message : String(e));
       setLoadError(msg);
-    } finally {
-      if (!cancelledRef.current) {
-        if (showLoading) setLoading(false);
-        else setRefreshing(false);
-      }
+      if (showLoading) setLoading(false);
+      else setRefreshing(false);
+      setStatusLoading(false);
+      setSweepLoading(false);
+      return;
     }
+
+    if (!cancelledRef.current) {
+      if (showLoading) setLoading(false);
+      else setRefreshing(false);
+    }
+
+    setStatusLoading(true);
+    setSweepLoading(true);
+
+    const statusPromise = invoke<UnilateralExitStatus>("unilateral_exit_status")
+      .then((st) => {
+        if (cancelledRef.current) return;
+        setStatus(st);
+      })
+      .catch((e) => {
+        if (cancelledRef.current) return;
+        const msg = typeof e === "string" ? e : (e instanceof Error ? e.message : String(e));
+        console.warn("unilateral_exit_status failed:", msg);
+      })
+      .finally(() => {
+        if (!cancelledRef.current) setStatusLoading(false);
+      });
+
+    const sweepPromise = invoke<ExitSweepStatus>("unilateral_exit_sweep_status")
+      .then((sw) => {
+        if (cancelledRef.current) return;
+        setSweep(sw);
+      })
+      .catch((e) => {
+        if (cancelledRef.current) return;
+        const msg = typeof e === "string" ? e : (e instanceof Error ? e.message : String(e));
+        console.warn("unilateral_exit_sweep_status failed:", msg);
+      })
+      .finally(() => {
+        if (!cancelledRef.current) setSweepLoading(false);
+      });
+
+    await Promise.allSettled([statusPromise, sweepPromise]);
   }, []);
 
   useEffect(() => {
@@ -198,11 +241,13 @@ export function RecoveryRoute() {
           aria-label="Refresh now"
           title="Refresh now"
           onClick={() => void loadAll(false)}
-          disabled={refreshing || loading}
+          disabled={refreshing || loading || statusLoading || sweepLoading}
           className="rounded-full theme-card-elevated p-2 active:scale-95 transition-transform disabled:opacity-50"
         >
           <svg
-            className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            className={`h-4 w-4 ${
+              refreshing || statusLoading || sweepLoading ? "animate-spin" : ""
+            }`}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -226,7 +271,14 @@ export function RecoveryRoute() {
       </p>
 
       {loading && (
-        <div className="rounded-2xl theme-card p-4 text-sm theme-text-muted">Loading…</div>
+        <>
+          <PreflightSkeleton />
+          <BranchesSkeleton />
+          <SweepSkeleton />
+          <span className="sr-only" aria-live="polite">
+            Loading recovery state
+          </span>
+        </>
       )}
 
       {loadError && !loading && (
@@ -259,7 +311,9 @@ export function RecoveryRoute() {
               ))}
             </ul>
           )}
-          {preflight.onchainBalanceSat === 0 && preflight.onchainAddress && (
+          {preflight.onchainBalanceSat === 0 &&
+            preflight.onchainPendingSat === 0 &&
+            preflight.onchainAddress && (
             <div className="rounded-xl theme-card-elevated p-3 mb-3 space-y-2">
               <p className="text-xs font-semibold theme-text">Plain onchain address</p>
               <p className="text-[11px] theme-text-muted">
@@ -305,13 +359,46 @@ export function RecoveryRoute() {
             </div>
             <div>
               <p className="theme-text-muted mb-0.5">Branches</p>
-              <p className="theme-text tabular-nums">{status?.branches.length ?? 0}</p>
+              {status !== null ? (
+                <p className="theme-text tabular-nums">{status.branches.length}</p>
+              ) : statusLoading ? (
+                <Skeleton className="h-4 w-6 mt-0.5" />
+              ) : (
+                <p
+                  className="theme-text-muted tabular-nums"
+                  title="Couldn't load branches"
+                >
+                  —
+                </p>
+              )}
             </div>
           </div>
         </section>
       )}
 
-      {!loading && status && status.branches.length > 0 && (
+      {!loading && statusLoading && status === null && <BranchesSkeleton />}
+
+      {!loading && !statusLoading && status === null && (
+        <div className="rounded-2xl theme-warning-bg theme-warning border theme-warning-border p-4 text-sm">
+          Couldn't load recovery branches. Tap refresh to retry.
+        </div>
+      )}
+
+      {!loading && status && status.branches.length > 0 && (() => {
+        // Multiple VTXOs can descend from the same Ark round commitment, so
+        // their exit chains share early-tree virtual txs. Map each pending
+        // txid to the branches it's the next-pending for; if more than one
+        // branch shares it, broadcasting once advances all of them.
+        const sharedNextPending = new Map<string, number[]>();
+        for (const b of status.branches) {
+          if (b.nextPendingIndex !== null) {
+            const txid = b.txs[b.nextPendingIndex].txid;
+            const list = sharedNextPending.get(txid) ?? [];
+            list.push(b.branchIndex);
+            sharedNextPending.set(txid, list);
+          }
+        }
+        return (
         <section className="space-y-3">
           {status.branches.map((branch) => {
             const total = branch.txs.length;
@@ -324,11 +411,16 @@ export function RecoveryRoute() {
 
             return (
               <div key={branch.branchIndex} className="rounded-2xl theme-card p-4 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-baseline justify-between gap-2">
                   <p className="text-sm font-semibold theme-text">
                     Branch {branch.branchIndex + 1}
+                    {branch.sourceAmountSat !== null && (
+                      <span className="ml-2 font-normal theme-text-muted tabular-nums">
+                        · {formatSats(branch.sourceAmountSat)} sats
+                      </span>
+                    )}
                   </p>
-                  <span className="text-xs theme-text-muted tabular-nums">
+                  <span className="shrink-0 text-xs theme-text-muted tabular-nums">
                     {confirmed} of {total} confirmed
                   </span>
                 </div>
@@ -350,6 +442,20 @@ export function RecoveryRoute() {
                     <div className="text-xs theme-text-muted">
                       Next pending: <span className="theme-text font-mono">{shortTxid(nextTx!.txid)}</span>
                     </div>
+
+                    {(() => {
+                      const sharers = sharedNextPending.get(nextTx!.txid) ?? [];
+                      const others = sharers.filter((i) => i !== branch.branchIndex);
+                      if (others.length === 0) return null;
+                      const labels = others
+                        .map((i) => `Branch ${i + 1}`)
+                        .join(", ");
+                      return (
+                        <p className="text-[11px] theme-accent">
+                          Broadcasting this also advances {labels}.
+                        </p>
+                      );
+                    })()}
 
                     {showingConfirm && confirmation && (
                       <div className="rounded-xl theme-warning-bg p-3 space-y-2 text-xs">
@@ -408,12 +514,85 @@ export function RecoveryRoute() {
             );
           })}
         </section>
-      )}
+        );
+      })()}
 
       {!loading && status && status.branches.length === 0 && preflight?.ready && (
         <div className="rounded-2xl theme-card p-4 text-sm theme-text-muted">
           The recovery package is empty — there is nothing to broadcast.
         </div>
+      )}
+
+      {!loading && sweepLoading && sweep === null && <SweepSkeleton />}
+
+      {!loading && sweep && sweep.vtxos.length > 0 && (
+        <section className="mt-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold theme-text">Awaiting sweep</h2>
+            <span className="text-[11px] theme-text-muted">
+              Exit delay: ~{formatExitDelay(sweep.csvDelaySeconds)}
+            </span>
+          </div>
+          <p className="text-xs theme-text-muted mb-3 leading-snug">
+            VTXOs you've already broadcast. Each is on-chain but locked by a CSV
+            timelock; once a countdown reaches zero, the sweep form below moves
+            all unlocked funds to any Bitcoin address in one transaction.
+          </p>
+          <div className="space-y-3">
+            {sweep.vtxos.map((v) => {
+              const remaining = v.csvMatureAt !== null ? v.csvMatureAt - sweep.now : null;
+              return (
+                <div
+                  key={`${v.txid}:${v.vout}`}
+                  className="rounded-2xl theme-card p-4 space-y-2"
+                >
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm font-semibold theme-text tabular-nums">
+                      {formatSats(v.amountSat)} sats
+                    </p>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                        v.mature ? "theme-accent-bg" : "theme-warning-bg theme-warning"
+                      }`}
+                    >
+                      {v.mature
+                        ? "Ready to sweep"
+                        : remaining !== null
+                          ? `In ${formatCountdown(remaining)}`
+                          : "Awaiting confirmation"}
+                    </span>
+                  </div>
+                  <p className="font-mono text-[11px] theme-text-muted">
+                    {shortTxid(v.txid)}:{v.vout}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+          {(() => {
+            const mature = sweep.vtxos.filter((v) => v.mature);
+            if (mature.length === 0) return null;
+            const totalSat = mature.reduce((sum, v) => sum + v.amountSat, 0);
+            return (
+              <div className="rounded-2xl theme-card p-4 space-y-2 mt-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="text-sm font-semibold theme-text tabular-nums">
+                    {formatSats(totalSat)} sats ready
+                  </p>
+                  <span className="text-[11px] theme-text-muted">
+                    {mature.length} output{mature.length > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <SweepForm
+                  totalSat={totalSat}
+                  dustSat={sweep.dustSat}
+                  outputCount={mature.length}
+                  onSwept={() => void loadAll(false)}
+                />
+              </div>
+            );
+          })()}
+        </section>
       )}
     </div>
   );

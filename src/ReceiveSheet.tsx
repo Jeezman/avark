@@ -7,6 +7,7 @@ import { Drawer } from 'vaul';
 import { useLnInvoice } from './hooks/useLnInvoice';
 import { useKeyboardInset } from './hooks/useKeyboardInset';
 import { useSatsToFiat } from './context/FiatContext';
+import { parseSatAmount } from './utils/amount';
 import { formatSats } from './utils/format';
 import { launchConfetti } from './utils/confetti';
 import { playSuccessSound, triggerHaptic } from './utils/receiveFeedback';
@@ -407,7 +408,7 @@ function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
   const [currentPaymentIndex, setCurrentPaymentIndex] = useState(0);
   const initialBoardingSat = useRef<number | null>(null);
 
-  const amountSats = /^\d+$/.test(amountInput) ? Number(amountInput) : null;
+  const amountSats = parseSatAmount(amountInput);
   const amountFiat = useSatsToFiat(amountSats ?? 0);
   const ln = useLnInvoice();
 

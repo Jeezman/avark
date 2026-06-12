@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from "react";
 import { Drawer } from "vaul";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
@@ -11,6 +10,32 @@ import { useWalletConnect } from "../context/WalletConnectContext";
 const IS_MOBILE_WEBVIEW = /Android|iPhone|iPad/i.test(
   typeof navigator !== "undefined" ? navigator.userAgent : ""
 );
+
+type MobileWallet = {
+  name: string;
+  buildLink: (wcUri: string) => string;
+};
+
+const MOBILE_WALLETS: MobileWallet[] = [
+  {
+    name: 'MetaMask',
+    buildLink: (uri) =>
+      `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`,
+  },
+  {
+    name: 'Trust Wallet',
+    buildLink: (uri) =>
+      `https://link.trustwallet.com/wc?uri=${encodeURIComponent(uri)}`,
+  },
+  {
+    name: 'Coinbase Wallet',
+    buildLink: (uri) => `https://go.cb-w.com/wc?uri=${encodeURIComponent(uri)}`,
+  },
+  {
+    name: 'OneKey',
+    buildLink: (uri) => `onekey-wallet://wc?uri=${encodeURIComponent(uri)}`,
+  }
+];
 
 function truncate(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -29,26 +54,6 @@ export function WalletConnectButton() {
 
   const sheetOpen = status === "connecting";
 
-  // Track which pairing URI the deep-link attempt failed against. Deriving
-  // the boolean from `failedUri === pairingUri` means state resets naturally
-  // as the URI rotates — no synchronous setState in the effect body.
-  const didDeepLinkRef = useRef(false);
-  const [failedUri, setFailedUri] = useState<string | null>(null);
-  const deepLinkFailed = failedUri !== null && failedUri === pairingUri;
-
-  useEffect(() => {
-    if (!pairingUri) {
-      didDeepLinkRef.current = false;
-      return;
-    }
-    if (!IS_MOBILE_WEBVIEW || didDeepLinkRef.current) return;
-    didDeepLinkRef.current = true;
-    openUrl(pairingUri).catch(() => {
-      setFailedUri(pairingUri);
-      toast.error("No wallet app responded — scan the QR or copy the URI");
-    });
-  }, [pairingUri]);
-
   function handleClose() {
     cancelPairing();
   }
@@ -61,9 +66,18 @@ export function WalletConnectButton() {
       .catch(() => toast.error("Copy failed"));
   }
 
-  function reopenWallet() {
+  function openWallet(wallet: MobileWallet) {
     if (!pairingUri) return;
-    openUrl(pairingUri).catch(() => toast.error("Couldn't open wallet app"));
+    openUrl(wallet.buildLink(pairingUri)).catch(() =>
+      toast.error(`Couldn't open ${wallet.name}`),
+    );
+  }
+
+  function openOtherWallet() {
+    if (!pairingUri) return;
+    openUrl(pairingUri).catch(() =>
+      toast.error("No wallet app handled the request — copy the URI instead."),
+    );
   }
 
   if (status === "initializing") {
@@ -201,29 +215,38 @@ export function WalletConnectButton() {
                 </Drawer.Title>
                 <Drawer.Description className="mt-2 text-[12px] theme-text-muted leading-relaxed">
                   {IS_MOBILE_WEBVIEW
-                    ? deepLinkFailed
-                      ? "No wallet app responded. Scan this QR from another device, or copy the URI and paste it into your wallet."
-                      : "Your wallet app should open automatically. If not, copy the URI or try again."
+                    ? "Pick your wallet to open the WalletConnect pairing. Don't see yours? Try “Open another wallet” or copy the URI."
                     : "Scan this QR with MetaMask Mobile, Rainbow, or any WalletConnect-compatible wallet."}
                 </Drawer.Description>
               </div>
 
               {pairingUri ? (
                 <>
-                  {(!IS_MOBILE_WEBVIEW || deepLinkFailed) && (
+                  {!IS_MOBILE_WEBVIEW && (
                     <div className="bg-white rounded-2xl p-4 shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
                       <QRCode value={pairingUri} size={220} />
                     </div>
                   )}
 
                   <div className="flex flex-col gap-2 w-full">
+                    {IS_MOBILE_WEBVIEW &&
+                      MOBILE_WALLETS.map((wallet) => (
+                        <button
+                          key={wallet.name}
+                          type="button"
+                          onClick={() => openWallet(wallet)}
+                          className="rounded-full theme-card-elevated py-3 text-[14px] font-semibold theme-text active:scale-[0.98] transition-transform"
+                        >
+                          Open {wallet.name}
+                        </button>
+                      ))}
                     {IS_MOBILE_WEBVIEW && (
                       <button
                         type="button"
-                        onClick={reopenWallet}
-                        className="rounded-full theme-button-primary py-3 text-[14px] font-bold active:scale-[0.98] transition-transform"
+                        onClick={openOtherWallet}
+                        className="rounded-full theme-card-elevated py-3 text-[13px] font-semibold theme-text active:scale-[0.98] transition-transform"
                       >
-                        Open Wallet App
+                        Open another wallet
                       </button>
                     )}
                     <button

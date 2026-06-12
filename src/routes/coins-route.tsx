@@ -5,6 +5,8 @@ import { formatSats } from "../utils/format";
 import { useWallet } from "../context/WalletContext";
 import { VtxoCard } from "../components/VtxoCard";
 import type { VtxoInfo } from "../components/VtxoCard";
+import { ExitingVtxoCard } from "../components/ExitingVtxoCard";
+import type { UnrolledVtxoMaturity } from "../components/recovery/SweepForm";
 import SelectedCoinsSendDrawer from "../components/SelectedCoinsSendDrawer";
 
 interface FeeEstimate {
@@ -16,14 +18,21 @@ interface RenewResult {
   txid: string | null;
 }
 
+/// Subset of the recovery screen's ExitSweepStatus that the coins list needs.
+interface ExitSweepStatus {
+  now: number;
+  vtxos: UnrolledVtxoMaturity[];
+}
+
 type SortKey = "expiry" | "amount";
-type FilterStatus = "all" | "confirmed" | "preconfirmed" | "recoverable";
+type FilterStatus = "all" | "confirmed" | "preconfirmed" | "recoverable" | "exiting";
 
 const FILTERS: { value: FilterStatus; label: string }[] = [
   { value: "all", label: "All" },
   { value: "confirmed", label: "Spendable" },
   { value: "preconfirmed", label: "Pre-confirmed" },
   { value: "recoverable", label: "Recoverable" },
+  { value: "exiting", label: "Exiting" },
 ];
 
 const SETTLE_ELIGIBILITY_WINDOW_SECS = 28 * 24 * 60 * 60;
@@ -73,20 +82,40 @@ export function CoinsRoute() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [sendDrawerOpen, setSendDrawerOpen] = useState(false);
+  const [exitSweep, setExitSweep] = useState<ExitSweepStatus | null>(null);
 
   const loading = !vtxosLoaded;
 
-  // On mount, refresh in the background. fetchVtxos() (no-arg) skips the
-  // network call when the cache is still fresh, so re-navigating between
-  // tabs is cheap; first-ever mount triggers the full load.
+  // VTXOs mid unilateral-exit. Best-effort: needs the ASP (CSV delay) plus
+  // esplora, and most wallets have none — failure just hides the section.
+  const fetchExiting = useCallback(async () => {
+    try {
+      setExitSweep(await invoke<ExitSweepStatus>("unilateral_exit_sweep_status"));
+    } catch {
+      setExitSweep(null);
+    }
+  }, []);
+
   useEffect(() => {
     void fetchVtxos();
-  }, [fetchVtxos]);
+    void fetchExiting();
+  }, [fetchVtxos, fetchExiting]);
 
   const nowSecs = Date.now() / 1000;
 
+  // The ASP's vtxo list and the exiting list overlap during the window where
+  // an exit leaf is in the mempool but the ASP hasn't flagged the VTXO
+  // unrolled yet
+  const spendableVtxos = useMemo(() => {
+    const exiting = exitSweep?.vtxos;
+    if (!exiting || exiting.length === 0) return vtxos;
+    const exitingKeys = new Set(exiting.map((v) => `${v.txid}:${v.vout}`));
+    return vtxos.filter((v) => !exitingKeys.has(`${v.txid}:${v.vout}`));
+  }, [vtxos, exitSweep]);
+
   const filtered = useMemo(() => {
-    let result = vtxos;
+    if (filter === "exiting") return [];
+    let result = spendableVtxos;
     if (filter !== "all") {
       result = result.filter((v) => v.status === filter);
     }
@@ -94,11 +123,17 @@ export function CoinsRoute() {
       if (sortKey === "expiry") return a.expires_at - b.expires_at;
       return b.amount_sat - a.amount_sat;
     });
-  }, [vtxos, filter, sortKey]);
+  }, [spendableVtxos, filter, sortKey]);
+
+
+  const shownExiting = useMemo(
+    () => (filter === "all" || filter === "exiting" ? (exitSweep?.vtxos ?? []) : []),
+    [filter, exitSweep],
+  );
 
   const preconfirmedVtxos = useMemo(
-    () => vtxos.filter((v) => v.status === "preconfirmed"),
-    [vtxos],
+    () => spendableVtxos.filter((v) => v.status === "preconfirmed"),
+    [spendableVtxos],
   );
 
   const settleablePreconfirmedVtxos = useMemo(
@@ -107,18 +142,18 @@ export function CoinsRoute() {
   );
 
   const expiringVtxos = useMemo(
-    () => vtxos.filter((v) => v.status === "confirmed" && isExpiring(v.expires_at)),
-    [vtxos],
+    () => spendableVtxos.filter((v) => v.status === "confirmed" && isExpiring(v.expires_at)),
+    [spendableVtxos],
   );
 
   const recoverableVtxos = useMemo(
-    () => vtxos.filter((v) => v.status === "recoverable"),
-    [vtxos],
+    () => spendableVtxos.filter((v) => v.status === "recoverable"),
+    [spendableVtxos],
   );
 
   const selectedVtxos = useMemo(
-    () => vtxos.filter((v) => selectedKeys.has(`${v.txid}:${v.vout}`)),
-    [vtxos, selectedKeys],
+    () => spendableVtxos.filter((v) => selectedKeys.has(`${v.txid}:${v.vout}`)),
+    [spendableVtxos, selectedKeys],
   );
 
   const selectedTotalSat = useMemo(
@@ -270,7 +305,10 @@ export function CoinsRoute() {
             {selectMode ? "Cancel" : "Select"}
           </button>
           <button
-            onClick={() => void fetchVtxos(true)}
+            onClick={() => {
+              void fetchVtxos(true);
+              void fetchExiting();
+            }}
             disabled={refreshingVtxos}
             className="rounded-full theme-card-elevated p-2 theme-text-secondary hover:opacity-80 transition-colors disabled:opacity-40"
             title="Refresh"
@@ -396,9 +434,9 @@ export function CoinsRoute() {
       {/* VTXO List */}
       <div className="px-6">
         <h2 className="text-sm font-semibold theme-text-muted mb-3">
-          VTXOs ({filtered.length})
+          VTXOs ({filtered.length + shownExiting.length})
         </h2>
-        {filtered.length === 0 ? (
+        {filtered.length === 0 && shownExiting.length === 0 ? (
           <div className="rounded-2xl theme-card p-8 text-center">
             <p className="theme-text-muted text-sm">
               {filter !== "all" ? "No matching VTXOs" : "No VTXOs"}
@@ -423,6 +461,13 @@ export function CoinsRoute() {
                 />
               );
             })}
+            {shownExiting.map((vtxo) => (
+              <ExitingVtxoCard
+                key={`exiting-${vtxo.txid}:${vtxo.vout}`}
+                vtxo={vtxo}
+                now={exitSweep?.now ?? nowSecs}
+              />
+            ))}
           </div>
         )}
       </div>

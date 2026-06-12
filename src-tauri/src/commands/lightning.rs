@@ -269,7 +269,7 @@ pub async fn get_ln_invoice(app: tauri::AppHandle, amount_sat: u64) -> Result<St
 
     let amount = bitcoin::Amount::from_sat(amount_sat);
     let result = client
-        .get_ln_invoice(ark_client::SwapAmount::invoice(amount), None)
+        .get_ln_invoice(ark_client::SwapAmount::invoice(amount), None, None)
         .await
         .map_err(|e| AppError::Wallet(format!("Failed to create Lightning invoice: {e}")))?;
 

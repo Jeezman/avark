@@ -19,11 +19,14 @@ const RELAY_URL = import.meta.env.VITE_WALLETCONNECT_RELAY_URL as
   | string
   | undefined;
 
-// We never invoke wallet-side RPC methods — the LendaSwap claim flow is
-// preimage-POST via Gelato (see commands/lendaswap.rs), so we only need the
-// session for its account address. Leaving `methods: []` means wallets that
-// don't advertise signing still pair.
-const EIP155_METHODS: string[] = [];
+const EIP155_METHODS = [
+  "personal_sign",
+  "eth_sign",
+  "eth_signTypedData",
+  "eth_signTypedData_v4",
+  "eth_sendTransaction",
+  "eth_signTransaction",
+];
 const EIP155_EVENTS = ["accountsChanged", "chainChanged"];
 const ETH_MAINNET = "eip155:1";
 
@@ -54,6 +57,10 @@ function addressFromAccount(account: string | undefined): string | null {
   return parts.length === 3 ? parts[2] ?? null : null;
 }
 
+function sessionAddress(session: SessionTypes.Struct): string | null {
+  return addressFromAccount(session.namespaces.eip155?.accounts[0]);
+}
+
 export function WalletConnectProvider({
   children,
 }: {
@@ -71,6 +78,24 @@ export function WalletConnectProvider({
       : "VITE_WALLETCONNECT_PROJECT_ID is not set. Add it to .env and rebuild."
   );
   const [pairingUri, setPairingUri] = useState<string | null>(null);
+  const deadTopicsRef = useRef<Set<string>>(new Set());
+
+  const rejectAccountlessSession = useCallback(
+    (client: SignClient, session: SessionTypes.Struct) => {
+      deadTopicsRef.current.add(session.topic);
+      client
+        .disconnect({
+          topic: session.topic,
+          reason: { code: 6000, message: "Session has no eip155 account" },
+        })
+        .catch(() => {
+          // Best-effort: the topic is in deadTopicsRef, so even if the
+          // relay is unreachable and the session lingers in the store, it
+          // will never be adopted.
+        });
+    },
+    []
+  );
 
   useEffect(() => {
     if (!PROJECT_ID) return;
@@ -96,11 +121,13 @@ export function WalletConnectProvider({
         // sessions to localStorage by default — survives app restart.
         const sessions = client.session.getAll();
         const session = sessions.length > 0 ? sessions[sessions.length - 1] : null;
-        if (session) {
+        const restoredAddress = session ? sessionAddress(session) : null;
+        if (session && restoredAddress) {
           sessionRef.current = session;
-          setAddress(addressFromAccount(session.namespaces.eip155?.accounts[0]));
+          setAddress(restoredAddress);
           setStatus("connected");
         } else {
+          if (session) rejectAccountlessSession(client, session);
           setStatus("idle");
         }
 
@@ -131,6 +158,41 @@ export function WalletConnectProvider({
     };
   }, []);
 
+  // Re-sync from the SignClient session store while the app is running.
+  useEffect(() => {
+    function syncFromStore() {
+      const client = clientRef.current;
+      if (!client) return;
+      const sessions = client.session.getAll();
+      const latest =
+        sessions.length > 0 ? sessions[sessions.length - 1] : null;
+      if (!latest) return;
+      if (latest.topic === sessionRef.current?.topic) return;
+      if (deadTopicsRef.current.has(latest.topic)) return;
+      const addr = sessionAddress(latest);
+      if (!addr) {
+        rejectAccountlessSession(client, latest);
+        return;
+      }
+      sessionRef.current = latest;
+      setAddress(addr);
+      setPairingUri(null);
+      setError(null);
+      setStatus("connected");
+    }
+    function onVisibility() {
+      if (document.visibilityState === "visible") syncFromStore();
+    }
+    const intervalId = window.setInterval(syncFromStore, 1500);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", syncFromStore);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", syncFromStore);
+    };
+  }, []);
+
   const connect = useCallback(async () => {
     const client = clientRef.current;
     if (!client) return;
@@ -138,7 +200,8 @@ export function WalletConnectProvider({
     setStatus("connecting");
     try {
       const { uri, approval } = await client.connect({
-        requiredNamespaces: {
+        requiredNamespaces: {},
+        optionalNamespaces: {
           eip155: {
             chains: [ETH_MAINNET],
             methods: EIP155_METHODS,
@@ -148,15 +211,28 @@ export function WalletConnectProvider({
       });
       if (uri) setPairingUri(uri);
       const session = await approval();
+      const addr = sessionAddress(session);
+      if (!addr) {
+        rejectAccountlessSession(client, session);
+        setPairingUri(null);
+        setStatus("error");
+        setError(
+          "The wallet approved the connection without an Ethereum account. " +
+            "Reconnect and select an Ethereum account in your wallet."
+        );
+        return;
+      }
       sessionRef.current = session;
-      setAddress(addressFromAccount(session.namespaces.eip155?.accounts[0]));
+      setAddress(addr);
       setPairingUri(null);
       setStatus("connected");
     } catch (e) {
       console.error("[wc] connect() failed:", e);
       setPairingUri(null);
-      setStatus("error");
-      setError((e as Error).message ?? String(e));
+      if (!sessionRef.current) {
+        setStatus("error");
+        setError((e as Error).message ?? String(e));
+      }
     }
   }, []);
 
@@ -168,6 +244,8 @@ export function WalletConnectProvider({
   const disconnect = useCallback(async () => {
     const client = clientRef.current;
     const session = sessionRef.current;
+    // Mark the topic dead BEFORE the relay round-trip
+    if (session) deadTopicsRef.current.add(session.topic);
     sessionRef.current = null;
     setAddress(null);
     setStatus("idle");
@@ -178,7 +256,7 @@ export function WalletConnectProvider({
           reason: { code: 6000, message: "User disconnected" },
         });
       } catch {
-        // Already disconnected / topic invalid — state is already cleared.
+        // Relay unreachable or topic already gone.
       }
     }
   }, []);

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { useKeyboardInset } from "../hooks/useKeyboardInset";
 import { formatSats } from "../utils/format";
+import { parseSatAmount } from "../utils/amount";
 import type { VtxoInfo } from "./VtxoCard";
 
 interface SelectedCoinsSendDrawerProps {
@@ -44,7 +45,7 @@ function DrawerBody({
   const [txid, setTxid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const amountSat = /^\d+$/.test(amountInput) ? Number(amountInput) : null;
+  const amountSat = parseSatAmount(amountInput);
   const overTotal = amountSat !== null && amountSat > totalSat;
   const canSend =
     selectedVtxos.length > 0 &&

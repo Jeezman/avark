@@ -22,6 +22,8 @@ pub struct SettingsInfo {
     pub esplora_url: Option<String>,
     pub fiat_enabled: bool,
     pub fiat_currency: String,
+    pub submitpackage_url: Option<String>,
+    pub submitpackage_token_configured: bool,
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -36,6 +38,11 @@ pub async fn settings(app: tauri::AppHandle) -> Result<SettingsInfo, AppError> {
         esplora_url: s.esplora_url,
         fiat_enabled: s.fiat_enabled.unwrap_or(true),
         fiat_currency: s.fiat_currency.unwrap_or_else(|| "USD".to_string()),
+        submitpackage_url: s.submitpackage_url,
+        submitpackage_token_configured: s
+            .submitpackage_token
+            .as_deref()
+            .is_some_and(|t| !t.is_empty()),
     })
 }
 
@@ -87,5 +94,33 @@ pub async fn set_esplora_url(app: tauri::AppHandle, url: Option<String>) -> Resu
     let _lock = state.0.write().await;
     let mut s = read_settings(&app).await?;
     s.esplora_url = url.filter(|u| !u.is_empty());
+    write_settings(&app, &s).await
+}
+
+/// Set the `submitpackage` broadcast endpoint and its bearer token. Pass both
+/// as `None`/empty to clear them. Both must be configured for offline package
+/// broadcast to use the endpoint; if either is missing, broadcasts fall back
+/// to esplora's sequential `POST /tx` (which fails for TRUC + P2A packages on
+/// mainnet — see `upstream-submitpackage-issue.md`).
+#[tauri::command(rename_all = "camelCase")]
+pub async fn set_submitpackage_endpoint(
+    app: tauri::AppHandle,
+    url: Option<String>,
+    token: Option<String>,
+) -> Result<(), AppError> {
+    if let Some(ref u) = url {
+        if !u.is_empty() {
+            let parsed =
+                url::Url::parse(u).map_err(|e| AppError::Wallet(format!("Invalid URL: {e}")))?;
+            if !matches!(parsed.scheme(), "http" | "https") {
+                return Err(AppError::Wallet("URL scheme must be http or https".into()));
+            }
+        }
+    }
+    let state = app.state::<SettingsLock>();
+    let _lock = state.0.write().await;
+    let mut s = read_settings(&app).await?;
+    s.submitpackage_url = url.filter(|u| !u.is_empty());
+    s.submitpackage_token = token.filter(|t| !t.is_empty());
     write_settings(&app, &s).await
 }
