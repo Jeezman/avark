@@ -44,6 +44,15 @@ pub(crate) struct Settings {
     pub(crate) fiat_enabled: Option<bool>,
     #[serde(default)]
     pub(crate) fiat_currency: Option<String>,
+    /// HTTPS endpoint that accepts `{"hex": ["parent","child"]}` and forwards
+    /// to a Bitcoin Core `submitpackage` RPC. Required for offline unilateral
+    /// exit broadcast
+    #[serde(default)]
+    pub(crate) submitpackage_url: Option<String>,
+    /// Bearer token sent in the `Authorization` header when calling the
+    /// submitpackage endpoint.
+    #[serde(default)]
+    pub(crate) submitpackage_token: Option<String>,
 }
 
 pub(crate) struct AppWalletState {
@@ -52,20 +61,12 @@ pub(crate) struct AppWalletState {
     pub(crate) swap_storage: Arc<ark_client::SqliteSwapStorage>,
     pub(crate) key_provider: Arc<ark_client::Bip32KeyProvider>,
     pub(crate) _sync_cancel: tokio::sync::watch::Sender<()>,
-    /// Cancellation token for all background tasks tied to this wallet session.
-    /// When the wallet is deleted/replaced, the sender is dropped and all
-    /// receivers see the channel close.
     pub(crate) wallet_cancel: tokio::sync::watch::Sender<()>,
 }
 pub(crate) struct GlobalWalletState(pub(crate) RwLock<Option<AppWalletState>>);
 
-/// Guards wallet creation so only one can run at a time.
 pub(crate) struct WalletCreationLock(pub(crate) tokio::sync::Mutex<()>);
 
-/// Guards the read-generate-write sequence in `nostr_generate_identity`.
-/// Without this, two concurrent callers can both observe an empty NSEC_KEY,
-/// generate different keypairs, and race on `store.set` — leaving the caller
-/// holding an `npub` that no longer matches the stored `nsec`.
 pub(crate) struct NostrGenerateLock(pub(crate) tokio::sync::Mutex<()>);
 
 /// Interval for background onchain wallet sync.
@@ -123,6 +124,10 @@ pub(crate) fn swap_db_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> 
 
 pub(crate) fn lendaswap_db_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     app_data_file(app, "lendaswap.db")
+}
+
+pub(crate) fn unilateral_exit_cache_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+    app_data_file(app, "unilateral_exit_cache.json")
 }
 
 pub(crate) const MNEMONIC_KEY: &str = "wallet-mnemonic";
@@ -258,10 +263,6 @@ pub fn run() {
             tokio::sync::Mutex::new(None),
         ))
         .setup(|app| {
-            // Open the swap records DB. Failure here leaves avark's core
-            // wallet features fully functional; the Swap tab will fail loudly
-            // on first IPC call. The frontend reconciliation logic surfaces
-            // that as a user-visible error (`formatLendaSwapError`).
             let handle = app.handle().clone();
             match lendaswap_db_path(&handle) {
                 Ok(db_path) => match tauri::async_runtime::block_on(lendaswap::init(&db_path)) {
@@ -296,6 +297,15 @@ pub fn run() {
             commands::settings::set_esplora_url,
             commands::settings::set_fiat_enabled,
             commands::settings::set_fiat_currency,
+            commands::settings::set_submitpackage_endpoint,
+            // Recovery package
+            commands::recovery::refresh_unilateral_exit_cache,
+            commands::recovery::get_unilateral_exit_cache_status,
+            commands::recovery::unilateral_exit_preflight,
+            commands::recovery::unilateral_exit_status,
+            commands::recovery::unilateral_exit_broadcast_next,
+            commands::recovery::unilateral_exit_sweep_status,
+            commands::recovery::sweep_unrolled_to_onchain,
             // Wallet lifecycle
             commands::wallet::has_wallet,
             commands::wallet::create_wallet,

@@ -226,9 +226,7 @@ pub async fn send_ark(
     address: String,
     amount_sat: u64,
 ) -> Result<SendResult, AppError> {
-    if amount_sat == 0 {
-        return Err(AppError::Wallet("Amount must be greater than zero".into()));
-    }
+    let amount = validate_amount_sat(amount_sat)?;
 
     let client = {
         let state = app.state::<GlobalWalletState>();
@@ -241,8 +239,6 @@ pub async fn send_ark(
 
     let ark_addr = ark_core::ArkAddress::decode(&address)
         .map_err(|e| AppError::Wallet(format!("Invalid Ark address: {e}")))?;
-
-    let amount = bitcoin::Amount::from_sat(amount_sat);
 
     info!(address = %address, amount_sat = amount_sat, "sending Ark payment");
 
@@ -279,9 +275,7 @@ pub async fn send_ark_selected(
     amount_sat: u64,
     outpoints: Vec<String>,
 ) -> Result<SendResult, AppError> {
-    if amount_sat == 0 {
-        return Err(AppError::Wallet("Amount must be greater than zero".into()));
-    }
+    let amount = validate_amount_sat(amount_sat)?;
     if outpoints.is_empty() {
         return Err(AppError::Wallet("Select at least one coin to spend".into()));
     }
@@ -298,8 +292,6 @@ pub async fn send_ark_selected(
     let ark_addr = ark_core::ArkAddress::decode(&address)
         .map_err(|e| AppError::Wallet(format!("Invalid Ark address: {e}")))?;
     let vtxo_outpoints = super::coins::parse_outpoints(&outpoints)?;
-    let amount = bitcoin::Amount::from_sat(amount_sat);
-
     info!(
         address = %address,
         amount_sat = amount_sat,
@@ -325,15 +317,39 @@ pub async fn send_ark_selected(
     })
 }
 
+/// Validate a sat amount arriving from the IPC boundary. Rejects zero and
+/// anything above MAX_MONEY (21M BTC)
+pub(crate) fn validate_amount_sat(amount_sat: u64) -> Result<bitcoin::Amount, AppError> {
+    if amount_sat == 0 {
+        return Err(AppError::Wallet("Amount must be greater than zero".into()));
+    }
+    let amount = bitcoin::Amount::from_sat(amount_sat);
+    if amount > bitcoin::Amount::MAX_MONEY {
+        return Err(AppError::Wallet(
+            "Amount exceeds the total possible supply of bitcoin".into(),
+        ));
+    }
+    Ok(amount)
+}
+
+pub(crate) fn parse_onchain_address(
+    address: &str,
+    network: bitcoin::Network,
+) -> Result<bitcoin::Address, AppError> {
+    address
+        .parse::<bitcoin::Address<bitcoin::address::NetworkUnchecked>>()
+        .map_err(|e| AppError::Wallet(format!("Invalid Bitcoin address: {e}")))?
+        .require_network(network)
+        .map_err(|_| AppError::Wallet(format!("Address is not valid for {network}")))
+}
+
 #[tauri::command]
 pub async fn send_onchain(
     app: tauri::AppHandle,
     address: String,
     amount_sat: u64,
 ) -> Result<SendResult, AppError> {
-    if amount_sat == 0 {
-        return Err(AppError::Wallet("Amount must be greater than zero".into()));
-    }
+    let amount = validate_amount_sat(amount_sat)?;
 
     let client = {
         let state = app.state::<GlobalWalletState>();
@@ -344,12 +360,7 @@ pub async fn send_onchain(
         Arc::clone(&ws.client)
     };
 
-    let btc_addr = address
-        .parse::<bitcoin::Address<bitcoin::address::NetworkUnchecked>>()
-        .map_err(|e| AppError::Wallet(format!("Invalid Bitcoin address: {e}")))?
-        .assume_checked();
-
-    let amount = bitcoin::Amount::from_sat(amount_sat);
+    let btc_addr = parse_onchain_address(&address, client.server_info.network)?;
 
     info!(address = %address, amount_sat = amount_sat, "offboarding to onchain");
 
@@ -383,9 +394,7 @@ pub async fn estimate_onchain_send_fee(
     address: String,
     amount_sat: u64,
 ) -> Result<FeeEstimate, AppError> {
-    if amount_sat == 0 {
-        return Err(AppError::Wallet("Amount must be greater than zero".into()));
-    }
+    let amount = validate_amount_sat(amount_sat)?;
 
     let client = {
         let state = app.state::<GlobalWalletState>();
@@ -396,12 +405,7 @@ pub async fn estimate_onchain_send_fee(
         Arc::clone(&ws.client)
     };
 
-    let btc_addr = address
-        .parse::<bitcoin::Address<bitcoin::address::NetworkUnchecked>>()
-        .map_err(|e| AppError::Wallet(format!("Invalid Bitcoin address: {e}")))?
-        .assume_checked();
-
-    let amount = bitcoin::Amount::from_sat(amount_sat);
+    let btc_addr = parse_onchain_address(&address, client.server_info.network)?;
 
     let mut last_err = String::new();
     for attempt in 1..=FEE_ESTIMATE_MAX_RETRIES {
@@ -448,6 +452,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn validate_amount_rejects_zero() {
+        assert!(validate_amount_sat(0).is_err());
+    }
+
+    #[test]
+    fn validate_amount_rejects_above_max_money() {
+        let max = bitcoin::Amount::MAX_MONEY.to_sat();
+        assert!(validate_amount_sat(max).is_ok());
+        assert!(validate_amount_sat(max + 1).is_err());
+        assert!(validate_amount_sat(u64::MAX).is_err());
+    }
+
+    #[test]
+    fn validate_amount_accepts_normal_values() {
+        assert_eq!(
+            validate_amount_sat(2_610).unwrap(),
+            bitcoin::Amount::from_sat(2_610)
+        );
+    }
+
+    #[test]
+    fn parse_onchain_address_accepts_matching_network() {
+        let addr = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+        assert!(parse_onchain_address(addr, bitcoin::Network::Bitcoin).is_ok());
+    }
+
+    #[test]
+    fn parse_onchain_address_rejects_wrong_network() {
+        let addr = "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx";
+        let err = parse_onchain_address(addr, bitcoin::Network::Bitcoin).unwrap_err();
+        assert!(err.to_string().contains("not valid for bitcoin"), "{err}");
+    }
+
+    #[test]
+    fn parse_onchain_address_rejects_garbage() {
+        assert!(parse_onchain_address("not-an-address", bitcoin::Network::Bitcoin).is_err());
+    }
+
+    #[test]
     fn send_result_serializes() {
         let result = SendResult {
             txid: "abc123".to_string(),
@@ -455,8 +498,6 @@ mod tests {
         };
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["txid"], "abc123");
-        // `skip_serializing_if = "Option::is_none"` keeps the field out of the
-        // JSON entirely when absent, so Ark/onchain payloads look unchanged.
         assert!(json.get("pendingLnSwapId").is_none());
     }
 
@@ -508,9 +549,6 @@ mod tests {
 
     #[tokio::test]
     async fn detect_ark_address() {
-        // tark prefix with valid bech32m — this should be recognized as Ark.
-        // We can't test with a real address without the SDK, but we can test
-        // that an invalid address returns an error.
         let result = detect_address_type("not-a-valid-address".into()).await;
         assert!(result.is_err());
     }
@@ -549,12 +587,5 @@ mod tests {
         assert!(result.is_ok());
         let r = result.unwrap();
         assert!(matches!(r.address_type, AddressType::Bitcoin));
-    }
-
-    #[tokio::test]
-    async fn send_ark_rejects_zero_amount() {
-        // Can't call send_ark without a real app handle, but we can test
-        // detect_address_type and serialization. The zero-amount check is
-        // tested implicitly via the command's validation.
     }
 }

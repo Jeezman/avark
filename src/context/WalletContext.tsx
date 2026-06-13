@@ -18,6 +18,7 @@ export type ConnectionState =
   | "connecting"
   | "loading"
   | "connected"
+  | "offline"
   | "error";
 
 type FetchMode = "initial" | "manual" | "auto";
@@ -100,9 +101,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const cancelledRef = useRef(false);
   const fetchIdRef = useRef(0);
   const autoFailureStreakRef = useRef(0);
+  const connectionStateRef = useRef<ConnectionState>("checking");
+
+  useEffect(() => {
+    connectionStateRef.current = connectionState;
+  }, [connectionState]);
 
   const fetchData = useCallback(
     async (mode: FetchMode = "auto") => {
+      if (connectionStateRef.current === "offline") {
+        if (mode === "manual") {
+          toast.error("ASP is unreachable. Retry the connection before refreshing.");
+        }
+        return;
+      }
+
       const id = ++fetchIdRef.current;
       setRefreshing(true);
       try {
@@ -182,6 +195,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   );
 
   const fetchVtxos = useCallback(async (force = false) => {
+    if (connectionStateRef.current === "offline") {
+      toast.error("ASP is unreachable. Retry the connection before loading coins.");
+      return;
+    }
+
     if (!force) {
       const age = Date.now() - lastVtxosFetchRef.current;
       if (lastVtxosFetchRef.current > 0 && age < VTXOS_STALE_TIME_MS) return;
@@ -230,7 +248,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
             const message =
               typeof error === "string" ? error : "Failed to connect to ASP";
             setConnectionError(message);
-            setConnectionState("error");
+            setConnectionState("offline");
           });
       })
       .catch((error) => {

@@ -65,8 +65,11 @@ export const VtxoCard = memo(function VtxoCard({
   const expired = vtxo.expires_at < now;
   const expiring = (vtxo.expires_at - now) / 3600 < 72;
   const isRecoverable = vtxo.status === "recoverable";
+  const isPreconfirmed = vtxo.status === "preconfirmed";
   // No renew/recover affordance while picking coins — it would just be noise.
-  const showAction = canAct && !selectable && (isRecoverable || expiring);
+  const showAction = canAct && !selectable && (isRecoverable || isPreconfirmed || expiring);
+  const actionLabel = isRecoverable ? "Recover" : isPreconfirmed ? "Settle" : "Renew";
+  const actionClass = isRecoverable ? "theme-danger" : isPreconfirmed ? "theme-accent" : "theme-warning";
 
   return (
     <div
@@ -115,9 +118,9 @@ export const VtxoCard = memo(function VtxoCard({
                 e.stopPropagation();
                 onAction();
               }}
-              className={`text-[10px] hover:opacity-80 font-medium mt-0.5 ${isRecoverable ? "theme-danger" : "theme-warning"}`}
+              className={`text-[10px] hover:opacity-80 font-medium mt-0.5 ${actionClass}`}
             >
-              {isRecoverable ? "Recover" : "Renew"}
+              {actionLabel}
             </button>
           )}
         </div>

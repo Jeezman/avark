@@ -6,6 +6,7 @@ import QrScannerView from './QrScanner';
 import { useKeyboardInset } from './hooks/useKeyboardInset';
 import { useSatsToFiat } from './context/FiatContext';
 import { formatSats } from './utils/format';
+import { parseSatAmount } from './utils/amount';
 
 interface SendSheetProps {
   open: boolean;
@@ -64,7 +65,7 @@ function SendSheetContent({
   const [txid, setTxid] = useState<string | null>(null);
   const [lnPending, setLnPending] = useState(false);
 
-  const amountSats = /^\d+$/.test(amountInput) ? Number(amountInput) : null;
+  const amountSats = parseSatAmount(amountInput);
   const amountFiat = useSatsToFiat(amountSats ?? 0);
   const detectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feeAbortRef = useRef<AbortController | null>(null);
@@ -147,9 +148,7 @@ function SendSheetContent({
             setAddressError(null);
             // Trigger fee fetch if the detected type is bitcoin.
             if (result.address_type === 'bitcoin') {
-              const sats = /^\d+$/.test(currentAmount)
-                ? Number(currentAmount)
-                : null;
+              const sats = parseSatAmount(currentAmount);
               if (sats && sats > 0) fetchFee(val.trim(), sats);
             }
           })
@@ -185,7 +184,7 @@ function SendSheetContent({
         setAmountInput(val);
         // Re-fetch fee estimate with new amount if bitcoin address.
         if (currentAddressType === 'bitcoin' && currentAddress.trim()) {
-          const sats = /^\d+$/.test(val) ? Number(val) : null;
+          const sats = parseSatAmount(val);
           if (sats && sats > 0) {
             fetchFee(currentAddress.trim(), sats);
           } else {

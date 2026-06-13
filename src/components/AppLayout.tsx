@@ -1,14 +1,41 @@
-import { Outlet } from "@tanstack/react-router";
+import { Link, Outlet } from "@tanstack/react-router";
 import { BottomNav } from "./BottomNav";
 import { WalletProvider, useWallet } from "../context/WalletContext";
 
 function ConnectionGate() {
   const { connectionState, connectionError, connectWallet } = useWallet();
 
-  if (connectionState === "connected") {
+  if (connectionState === "connected" || connectionState === "offline") {
     return (
       <>
         <div style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 64px)" }}>
+          {connectionState === "offline" && (
+            <div
+              className="sticky top-0 z-40 border-b theme-warning-border theme-warning-bg px-4 py-3"
+              style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
+            >
+              <div className="mx-auto flex max-w-xl items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold theme-warning">ASP unreachable</p>
+                  <p className="break-words text-xs theme-text-secondary">
+                    {connectionError ?? "Wallet opened in offline mode."}
+                  </p>
+                </div>
+                <Link
+                  to="/recover/exit"
+                  className="shrink-0 rounded-lg theme-card-elevated px-3 py-2 text-xs font-semibold theme-text active:scale-95 transition-transform"
+                >
+                  Emergency exit
+                </Link>
+                <button
+                  className="shrink-0 rounded-lg bg-lime-300 px-3 py-2 text-xs font-bold text-gray-900 active:scale-95 transition-transform"
+                  onClick={connectWallet}
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
           <Outlet />
         </div>
         <BottomNav />

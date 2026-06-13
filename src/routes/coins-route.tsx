@@ -5,6 +5,8 @@ import { formatSats } from "../utils/format";
 import { useWallet } from "../context/WalletContext";
 import { VtxoCard } from "../components/VtxoCard";
 import type { VtxoInfo } from "../components/VtxoCard";
+import { ExitingVtxoCard } from "../components/ExitingVtxoCard";
+import type { UnrolledVtxoMaturity } from "../components/recovery/SweepForm";
 import SelectedCoinsSendDrawer from "../components/SelectedCoinsSendDrawer";
 
 interface FeeEstimate {
@@ -16,19 +18,49 @@ interface RenewResult {
   txid: string | null;
 }
 
+/// Subset of the recovery screen's ExitSweepStatus that the coins list needs.
+interface ExitSweepStatus {
+  now: number;
+  vtxos: UnrolledVtxoMaturity[];
+}
+
 type SortKey = "expiry" | "amount";
-type FilterStatus = "all" | "confirmed" | "preconfirmed" | "recoverable";
+type FilterStatus = "all" | "confirmed" | "preconfirmed" | "recoverable" | "exiting";
 
 const FILTERS: { value: FilterStatus; label: string }[] = [
   { value: "all", label: "All" },
   { value: "confirmed", label: "Spendable" },
   { value: "preconfirmed", label: "Pre-confirmed" },
   { value: "recoverable", label: "Recoverable" },
+  { value: "exiting", label: "Exiting" },
 ];
+
+const SETTLE_ELIGIBILITY_WINDOW_SECS = 28 * 24 * 60 * 60;
 
 function isExpiring(expiresAt: number): boolean {
   const now = Date.now() / 1000;
   return (expiresAt - now) / 3600 < 72;
+}
+
+function canSettleVtxo(vtxo: VtxoInfo, now: number): boolean {
+  return vtxo.status === "recoverable" || vtxo.expires_at - now <= SETTLE_ELIGIBILITY_WINDOW_SECS;
+}
+
+function actionForTargets(targets: VtxoInfo[]): "recover" | "settle" | "renew" {
+  if (targets.length > 0 && targets.every((v) => v.status === "recoverable")) return "recover";
+  if (targets.some((v) => v.status === "preconfirmed")) return "settle";
+  return "renew";
+}
+
+function actionText(action: "recover" | "settle" | "renew") {
+  switch (action) {
+    case "recover":
+      return { label: "Recover", active: "Recovering...", done: "recovered" };
+    case "settle":
+      return { label: "Settle", active: "Settling...", done: "settled" };
+    case "renew":
+      return { label: "Renew", active: "Renewing...", done: "renewed" };
+  }
 }
 
 export function CoinsRoute() {
@@ -50,20 +82,40 @@ export function CoinsRoute() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [sendDrawerOpen, setSendDrawerOpen] = useState(false);
+  const [exitSweep, setExitSweep] = useState<ExitSweepStatus | null>(null);
 
   const loading = !vtxosLoaded;
 
-  // On mount, refresh in the background. fetchVtxos() (no-arg) skips the
-  // network call when the cache is still fresh, so re-navigating between
-  // tabs is cheap; first-ever mount triggers the full load.
+  // VTXOs mid unilateral-exit. Best-effort: needs the ASP (CSV delay) plus
+  // esplora, and most wallets have none — failure just hides the section.
+  const fetchExiting = useCallback(async () => {
+    try {
+      setExitSweep(await invoke<ExitSweepStatus>("unilateral_exit_sweep_status"));
+    } catch {
+      setExitSweep(null);
+    }
+  }, []);
+
   useEffect(() => {
     void fetchVtxos();
-  }, [fetchVtxos]);
+    void fetchExiting();
+  }, [fetchVtxos, fetchExiting]);
 
-  const nowSecs = useMemo(() => Date.now() / 1000, [vtxos]);
+  const nowSecs = Date.now() / 1000;
+
+  // The ASP's vtxo list and the exiting list overlap during the window where
+  // an exit leaf is in the mempool but the ASP hasn't flagged the VTXO
+  // unrolled yet
+  const spendableVtxos = useMemo(() => {
+    const exiting = exitSweep?.vtxos;
+    if (!exiting || exiting.length === 0) return vtxos;
+    const exitingKeys = new Set(exiting.map((v) => `${v.txid}:${v.vout}`));
+    return vtxos.filter((v) => !exitingKeys.has(`${v.txid}:${v.vout}`));
+  }, [vtxos, exitSweep]);
 
   const filtered = useMemo(() => {
-    let result = vtxos;
+    if (filter === "exiting") return [];
+    let result = spendableVtxos;
     if (filter !== "all") {
       result = result.filter((v) => v.status === filter);
     }
@@ -71,21 +123,37 @@ export function CoinsRoute() {
       if (sortKey === "expiry") return a.expires_at - b.expires_at;
       return b.amount_sat - a.amount_sat;
     });
-  }, [vtxos, filter, sortKey]);
+  }, [spendableVtxos, filter, sortKey]);
+
+
+  const shownExiting = useMemo(
+    () => (filter === "all" || filter === "exiting" ? (exitSweep?.vtxos ?? []) : []),
+    [filter, exitSweep],
+  );
+
+  const preconfirmedVtxos = useMemo(
+    () => spendableVtxos.filter((v) => v.status === "preconfirmed"),
+    [spendableVtxos],
+  );
+
+  const settleablePreconfirmedVtxos = useMemo(
+    () => preconfirmedVtxos.filter((v) => canSettleVtxo(v, nowSecs)),
+    [preconfirmedVtxos, nowSecs],
+  );
 
   const expiringVtxos = useMemo(
-    () => vtxos.filter((v) => v.status !== "recoverable" && isExpiring(v.expires_at)),
-    [vtxos],
+    () => spendableVtxos.filter((v) => v.status === "confirmed" && isExpiring(v.expires_at)),
+    [spendableVtxos],
   );
 
   const recoverableVtxos = useMemo(
-    () => vtxos.filter((v) => v.status === "recoverable"),
-    [vtxos],
+    () => spendableVtxos.filter((v) => v.status === "recoverable"),
+    [spendableVtxos],
   );
 
   const selectedVtxos = useMemo(
-    () => vtxos.filter((v) => selectedKeys.has(`${v.txid}:${v.vout}`)),
-    [vtxos, selectedKeys],
+    () => spendableVtxos.filter((v) => selectedKeys.has(`${v.txid}:${v.vout}`)),
+    [spendableVtxos, selectedKeys],
   );
 
   const selectedTotalSat = useMemo(
@@ -93,28 +161,43 @@ export function CoinsRoute() {
     [selectedVtxos],
   );
 
+  const selectedSettleableVtxos = useMemo(
+    () => selectedVtxos.filter((v) => canSettleVtxo(v, nowSecs)),
+    [selectedVtxos, nowSecs],
+  );
+
+  const selectedSkippedVtxos = selectedVtxos.length - selectedSettleableVtxos.length;
+
   const startRenew = useCallback(async (targets: VtxoInfo[]) => {
     if (renewing) return;
-    if (targets.length === 0) {
-      toast.info("Nothing to renew");
+    const eligibleTargets = targets.filter((v) => canSettleVtxo(v, Date.now() / 1000));
+    const skippedTargets = targets.length - eligibleTargets.length;
+
+    if (eligibleTargets.length === 0) {
+      const action = actionText(actionForTargets(targets));
+      toast.info(`No VTXOs are ready to ${action.label.toLowerCase()} yet`);
       return;
+    }
+    if (skippedTargets > 0) {
+      toast.info(`${skippedTargets} VTXO${skippedTargets > 1 ? "s" : ""} skipped; not close enough to expiry yet`);
     }
 
     if (quickRenew) {
       // Skip confirmation
+      const action = actionText(actionForTargets(eligibleTargets));
       setRenewing(true);
-      const outpoints = targets.map((v) => `${v.txid}:${v.vout}`);
+      const outpoints = eligibleTargets.map((v) => `${v.txid}:${v.vout}`);
       try {
         const result = await invoke<RenewResult>("renew_vtxos", { outpoints });
         if (result.renewed) {
-          toast.success(`${outpoints.length} VTXO${outpoints.length > 1 ? "s" : ""} renewed${result.txid ? ` (txid: ${result.txid})` : ""}`);
+          toast.success(`${outpoints.length} VTXO${outpoints.length > 1 ? "s" : ""} ${action.done}${result.txid ? ` (txid: ${result.txid})` : ""}`);
           void fetchVtxos(true);
           void fetchData();
         } else {
-          toast.info("Nothing to renew");
+          toast.info(`Nothing to ${action.label.toLowerCase()}`);
         }
       } catch (e) {
-        toast.error(typeof e === "string" ? e : "Failed to renew VTXOs");
+        toast.error(typeof e === "string" ? e : `Failed to ${action.label.toLowerCase()} VTXOs`);
       } finally {
         setRenewing(false);
       }
@@ -122,8 +205,8 @@ export function CoinsRoute() {
     }
 
     setRenewing(true);
-    setPendingRenewTargets(targets);
-    const outpoints = targets.map((v) => `${v.txid}:${v.vout}`);
+    setPendingRenewTargets(eligibleTargets);
+    const outpoints = eligibleTargets.map((v) => `${v.txid}:${v.vout}`);
     try {
       const fee = await invoke<FeeEstimate>("estimate_renew_fees", { outpoints });
       setFeeEstimate(fee);
@@ -138,6 +221,7 @@ export function CoinsRoute() {
 
   const confirmRenew = useCallback(async () => {
     const targets = pendingRenewTargets ?? [];
+    const action = actionText(actionForTargets(targets));
     const outpoints = targets.map((v) => `${v.txid}:${v.vout}`);
     setRenewing(true);
     setShowRenewConfirm(false);
@@ -145,18 +229,26 @@ export function CoinsRoute() {
     try {
       const result = await invoke<RenewResult>("renew_vtxos", { outpoints });
       if (result.renewed) {
-        toast.success(`${outpoints.length} VTXO${outpoints.length > 1 ? "s" : ""} renewed${result.txid ? ` (txid: ${result.txid})` : ""}`);
+        toast.success(`${outpoints.length} VTXO${outpoints.length > 1 ? "s" : ""} ${action.done}${result.txid ? ` (txid: ${result.txid})` : ""}`);
+        setSelectMode(false);
+        setSelectedKeys(new Set());
         void fetchVtxos(true);
         void fetchData();
       } else {
-        toast.info("Nothing to renew");
+        toast.info(`Nothing to ${action.label.toLowerCase()}`);
       }
     } catch (e) {
-      toast.error(typeof e === "string" ? e : "Failed to renew VTXOs");
+      toast.error(typeof e === "string" ? e : `Failed to ${action.label.toLowerCase()} VTXOs`);
     } finally {
       setRenewing(false);
     }
   }, [pendingRenewTargets, fetchVtxos, fetchData]);
+
+  const pendingRenewAction = actionText(actionForTargets(pendingRenewTargets ?? []));
+  const selectedRenewAction = actionText(actionForTargets(selectedSettleableVtxos));
+  const selectedSettleLabel = selectedSettleableVtxos.length > 0
+    ? `${selectedRenewAction.label} ${selectedSettleableVtxos.length} selected`
+    : "No ready VTXOs";
 
   const toggleSelectMode = useCallback(() => {
     setExpandedId(null);
@@ -213,7 +305,10 @@ export function CoinsRoute() {
             {selectMode ? "Cancel" : "Select"}
           </button>
           <button
-            onClick={() => void fetchVtxos(true)}
+            onClick={() => {
+              void fetchVtxos(true);
+              void fetchExiting();
+            }}
             disabled={refreshingVtxos}
             className="rounded-full theme-card-elevated p-2 theme-text-secondary hover:opacity-80 transition-colors disabled:opacity-40"
             title="Refresh"
@@ -236,7 +331,7 @@ export function CoinsRoute() {
       </div>
 
       {/* Action buttons */}
-      {!selectMode && !showRenewConfirm && (expiringVtxos.length > 0 || recoverableVtxos.length > 0) && (
+      {!selectMode && !showRenewConfirm && (settleablePreconfirmedVtxos.length > 0 || expiringVtxos.length > 0 || recoverableVtxos.length > 0) && (
         <div className="px-6 pb-3 space-y-2">
           {recoverableVtxos.length > 0 && (
             <button
@@ -245,6 +340,15 @@ export function CoinsRoute() {
               className="w-full rounded-xl theme-danger-bg py-2.5 text-sm font-medium theme-danger hover:opacity-80 transition-opacity disabled:opacity-50"
             >
               {renewing ? "Recovering..." : `Recover ${recoverableVtxos.length} VTXO${recoverableVtxos.length > 1 ? "s" : ""} (${formatSats(recoverableVtxos.reduce((sum, v) => sum + v.amount_sat, 0))} sats)`}
+            </button>
+          )}
+          {settleablePreconfirmedVtxos.length > 0 && (
+            <button
+              onClick={() => void startRenew(settleablePreconfirmedVtxos)}
+              disabled={renewing}
+              className="w-full rounded-xl theme-accent-bg py-2.5 text-sm font-medium theme-accent hover:opacity-80 transition-opacity disabled:opacity-50"
+            >
+              {renewing ? "Settling..." : `Settle ${settleablePreconfirmedVtxos.length} pre-confirmed VTXO${settleablePreconfirmedVtxos.length > 1 ? "s" : ""} (${formatSats(settleablePreconfirmedVtxos.reduce((sum, v) => sum + v.amount_sat, 0))} sats)`}
             </button>
           )}
           {expiringVtxos.length > 0 && (
@@ -260,9 +364,9 @@ export function CoinsRoute() {
       )}
 
       {/* Renew Confirmation */}
-      {!selectMode && showRenewConfirm && (
+      {showRenewConfirm && (
         <div className="mx-6 mb-3 rounded-2xl theme-warning-bg border theme-warning-border p-4">
-          <p className="text-sm font-medium theme-warning mb-2">Renew VTXOs?</p>
+          <p className="text-sm font-medium theme-warning mb-2">{pendingRenewAction.label} VTXOs?</p>
           <p className="text-xs theme-text-secondary mb-1">
             This settles all eligible VTXOs into the next ASP round.
           </p>
@@ -278,7 +382,7 @@ export function CoinsRoute() {
             <span className={`h-4 w-4 rounded border-2 shrink-0 transition-colors ${
               quickRenew ? "border-current bg-current theme-accent" : "theme-border"
             }`} />
-            <span className="text-[10px] theme-text-muted text-left">Quick renew (skip confirmation next time)</span>
+            <span className="text-[10px] theme-text-muted text-left">Quick {pendingRenewAction.label.toLowerCase()} (skip confirmation next time)</span>
           </button>
           <div className="flex gap-3">
             <button
@@ -292,7 +396,7 @@ export function CoinsRoute() {
               disabled={renewing}
               className="flex-1 rounded-xl bg-yellow-500 py-2.5 text-sm font-bold text-gray-900 transition-colors hover:bg-yellow-400 disabled:opacity-50"
             >
-              {renewing ? "Renewing..." : "Renew"}
+              {renewing ? pendingRenewAction.active : pendingRenewAction.label}
             </button>
           </div>
         </div>
@@ -330,16 +434,16 @@ export function CoinsRoute() {
       {/* VTXO List */}
       <div className="px-6">
         <h2 className="text-sm font-semibold theme-text-muted mb-3">
-          VTXOs ({filtered.length})
+          VTXOs ({filtered.length + shownExiting.length})
         </h2>
-        {filtered.length === 0 ? (
+        {filtered.length === 0 && shownExiting.length === 0 ? (
           <div className="rounded-2xl theme-card p-8 text-center">
             <p className="theme-text-muted text-sm">
               {filter !== "all" ? "No matching VTXOs" : "No VTXOs"}
             </p>
           </div>
         ) : (
-          <div className={`space-y-2 ${selectMode ? "pb-32" : "pb-4"}`}>
+          <div className={`space-y-2 ${selectMode && !showRenewConfirm ? "pb-32" : "pb-4"}`}>
             {filtered.map((vtxo) => {
               const key = `${vtxo.txid}:${vtxo.vout}`;
               return (
@@ -348,7 +452,7 @@ export function CoinsRoute() {
                   vtxo={vtxo}
                   now={nowSecs}
                   expanded={expandedId === key}
-                  canAct={!selectMode && !showRenewConfirm && !renewing}
+                  canAct={!selectMode && !showRenewConfirm && !renewing && canSettleVtxo(vtxo, nowSecs)}
                   onToggle={() => setExpandedId(expandedId === key ? null : key)}
                   onAction={() => void startRenew([vtxo])}
                   selectable={selectMode && vtxo.status !== "recoverable"}
@@ -357,12 +461,19 @@ export function CoinsRoute() {
                 />
               );
             })}
+            {shownExiting.map((vtxo) => (
+              <ExitingVtxoCard
+                key={`exiting-${vtxo.txid}:${vtxo.vout}`}
+                vtxo={vtxo}
+                now={exitSweep?.now ?? nowSecs}
+              />
+            ))}
           </div>
         )}
       </div>
 
       {/* Coin-control send footer — sits just above the bottom nav */}
-      {selectMode && (
+      {selectMode && !showRenewConfirm && (
         <div
           className="fixed inset-x-0 z-30 theme-drawer border-t theme-border px-6 py-3"
           style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 64px)" }}
@@ -370,13 +481,21 @@ export function CoinsRoute() {
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs theme-text-muted">
               {selectedVtxos.length} selected
+              {selectedSkippedVtxos > 0 ? `, ${selectedSkippedVtxos} not ready` : ""}
             </span>
             <span className="text-sm font-semibold tabular-nums">
               {formatSats(selectedTotalSat)} sats
             </span>
           </div>
           <button
-            disabled={selectedVtxos.length === 0}
+            disabled={selectedSettleableVtxos.length === 0 || renewing}
+            onClick={() => void startRenew(selectedVtxos)}
+            className="mb-2 w-full rounded-xl theme-accent-bg py-2.5 text-sm font-bold theme-accent active:scale-[0.98] transition-transform disabled:opacity-30 disabled:active:scale-100"
+          >
+            {renewing ? selectedRenewAction.active : selectedSettleLabel}
+          </button>
+          <button
+            disabled={selectedVtxos.length === 0 || renewing}
             onClick={() => setSendDrawerOpen(true)}
             className="w-full rounded-xl bg-lime-300 py-2.5 text-sm font-bold text-gray-900 active:scale-[0.98] transition-transform disabled:opacity-30 disabled:active:scale-100"
           >

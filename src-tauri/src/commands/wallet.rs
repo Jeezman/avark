@@ -6,19 +6,21 @@ use tauri::{Emitter, Manager};
 use tracing::{debug, info, warn};
 
 use super::lightning::{spawn_pending_swap_recovery, BOLTZ_URL};
+use super::recovery::spawn_unilateral_exit_cache_refresh;
 use crate::{
     ark, boarding_db_path, lendaswap_db_path, load_mnemonic, read_settings, secure_storage,
-    store_mnemonic, swap_db_path, wallet, wallet_path, write_settings, AppError, AppWalletState,
-    GlobalWalletState, SettingsLock, WalletCreationLock, MNEMONIC_KEY, ONCHAIN_SYNC_INTERVAL,
+    store_mnemonic, swap_db_path, unilateral_exit_cache_path, wallet, wallet_path, write_settings,
+    AppError, AppWalletState, GlobalWalletState, SettingsLock, WalletCreationLock, MNEMONIC_KEY,
+    ONCHAIN_SYNC_INTERVAL,
 };
 
 #[derive(Debug, Serialize, serde::Deserialize)]
-struct WalletData {
-    asp_url: String,
-    network: String,
+pub(crate) struct WalletData {
+    pub(crate) asp_url: String,
+    pub(crate) network: String,
 }
 
-async fn read_wallet_data(app: &tauri::AppHandle) -> Result<WalletData, AppError> {
+pub(crate) async fn read_wallet_data(app: &tauri::AppHandle) -> Result<WalletData, AppError> {
     let path = wallet_path(app)?;
     let raw = tokio::fs::read_to_string(&path)
         .await
@@ -253,9 +255,10 @@ async fn build_ark_client(
         asp_url.to_string(),
         Arc::clone(&swap_storage),
         BOLTZ_URL.to_string(),
+        // boltz_referral_id: `None` falls back to the SDK's DEFAULT_BOLTZ_REFERRAL_ID
+        None,
         Duration::from_secs(30),
-        // v0.9.0 added 3rd-party delegator support. We don't use it —
-        // `None` + `vec![]` preserves the v0.8.0 "no delegator" behavior.
+        // delegator_pk + historical_delegator_pks
         None,
         vec![],
     );
@@ -451,7 +454,7 @@ pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
     let key_provider_for_recovery = Arc::clone(&key_provider);
     let (wallet_cancel, cancel_rx) = tokio::sync::watch::channel(());
     *global.0.write().await = Some(AppWalletState {
-        client: client_arc,
+        client: Arc::clone(&client_arc),
         wallet: wallet_arc,
         swap_storage,
         key_provider,
@@ -466,6 +469,7 @@ pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
         &app,
         cancel_rx,
     );
+    spawn_unilateral_exit_cache_refresh(app.clone(), Arc::clone(&client_arc));
 
     info!("wallet connected successfully");
     Ok(())
@@ -475,33 +479,25 @@ pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
 pub async fn delete_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
     warn!("deleting wallet data");
 
-    // 1. Drop in-memory state first — this drops wallet_cancel, signalling all
-    //    background tasks (swap recovery, LN claim, onchain sync) to stop.
+    // Drop in-memory state first — this drops wallet_cancel, signalling all
+    // background tasks (swap recovery, LN claim, onchain sync) to stop.
     let global = app.state::<GlobalWalletState>();
     *global.0.write().await = None;
 
-    // Give background tasks a moment to observe cancellation and release file handles.
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // 2. Remove wallet.json first — this is what has_wallet() checks, so deleting
-    //    it early ensures the app won't see a "wallet exists" state if later steps fail.
     let _ = remove_if_exists(&wallet_path(&app)?).await;
 
-    // 3. Delete mnemonic and Nostr identity from secure storage. WIPE means a
-    //    clean slate — leaving the nsec behind would resurrect the previous
-    //    npub on re-onboarding.
     let store = secure_storage::SecureStorage::get_instance(&app);
     let _ = store.delete(MNEMONIC_KEY);
     let _ = store.delete(crate::nostr::NSEC_KEY);
 
-    // 4. Best-effort cleanup of remaining files — don't bail on individual failures.
-    //    Includes lendaswap.db so a subsequent wallet restore doesn't hit
-    //    `MnemonicMismatch` against the SDK's stored mnemonic.
     let _ = remove_if_exists(&boarding_db_path(&app)?).await;
     let _ = remove_if_exists(&swap_db_path(&app)?).await;
     let _ = remove_if_exists(&lendaswap_db_path(&app)?).await;
 
-    // 5. Reset settings.
+    let _ = remove_if_exists(&unilateral_exit_cache_path(&app)?).await;
+
     let state = app.state::<SettingsLock>();
     let _lock = state.0.write().await;
     let mut settings = read_settings(&app).await.unwrap_or_default();
@@ -862,8 +858,7 @@ pub async fn settle(app: tauri::AppHandle) -> Result<SettleResult, AppError> {
 #[derive(Serialize)]
 pub struct RoundSchedule {
     /// Unix timestamp (seconds) of the next round start. Only populated when
-    /// the ASP publishes a `scheduled_session`; otherwise `None` and the UI
-    /// falls back to showing `session_duration` as a static cadence.
+    /// the ASP publishes a `scheduled_session`;
     next_start_time: Option<i64>,
     /// How long a round stays open, in seconds. Always populated from the
     /// ASP's `Info.session_duration`.

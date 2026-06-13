@@ -16,6 +16,7 @@ import {
   type TargetTokenId,
 } from "../lib/lendaswap/client";
 import { reconcilePendingSwaps } from "../lib/lendaswap/reconcile";
+import { parseSatAmount } from "../utils/amount";
 
 const TOKENS = [
   { id: "usdc_eth", label: "USDC", chain: "Ethereum" },
@@ -62,7 +63,7 @@ export function SwapRoute() {
     void reconcilePendingSwaps();
   }, []);
 
-  const parsedAmount = parseAmountSats(amountSats);
+  const parsedAmount = parseSatAmount(amountSats);
   const destinationAddress =
     destMode === "connected" ? (connectedAddress ?? "") : pastedAddress.trim();
 
@@ -641,8 +642,3 @@ function isBridgeUnavailableError(msg: string): boolean {
   return /lightning bridge is currently unavailable/i.test(msg);
 }
 
-function parseAmountSats(input: string): number | null {
-  const v = parseInt(input, 10);
-  if (!Number.isFinite(v) || v <= 0) return null;
-  return v;
-}
