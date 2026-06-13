@@ -146,10 +146,17 @@ jobs:
         env:
           VITE_WALLETCONNECT_PROJECT_ID: ${{ vars.VITE_WALLETCONNECT_PROJECT_ID }}
           VITE_DEFAULT_ASP_URL: ${{ vars.VITE_DEFAULT_ASP_URL }}
+          AVARK_SUBMITPACKAGE_URL: ${{ vars.AVARK_SUBMITPACKAGE_URL }}
+          AVARK_SUBMITPACKAGE_TOKEN: ${{ secrets.AVARK_SUBMITPACKAGE_TOKEN }}
         run: |
           missing=()
           [ -n "$VITE_WALLETCONNECT_PROJECT_ID" ] || missing+=(VITE_WALLETCONNECT_PROJECT_ID)
           [ -n "$VITE_DEFAULT_ASP_URL" ] || missing+=(VITE_DEFAULT_ASP_URL)
+          if [ -z "$AVARK_SUBMITPACKAGE_URL" ]; then
+            missing+=("AVARK_SUBMITPACKAGE_URL (URL is a Variable, not a Secret — vars.* reads Secrets as empty)")
+          elif [ -z "$AVARK_SUBMITPACKAGE_TOKEN" ]; then
+            echo "::notice::AVARK_SUBMITPACKAGE_URL is set without a token — building a tokenless default endpoint."
+          fi
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Release build env vars are empty: ${missing[*]}. Add them in repo Settings → Secrets and variables → Actions → Variables tab (not Secrets — vars.* can't read Secrets)."
             exit 1
@@ -178,6 +185,8 @@ jobs:
         env:
           VITE_WALLETCONNECT_PROJECT_ID: ${{ vars.VITE_WALLETCONNECT_PROJECT_ID }}
           VITE_DEFAULT_ASP_URL: ${{ vars.VITE_DEFAULT_ASP_URL }}
+          AVARK_SUBMITPACKAGE_URL: ${{ vars.AVARK_SUBMITPACKAGE_URL }}
+          AVARK_SUBMITPACKAGE_TOKEN: ${{ secrets.AVARK_SUBMITPACKAGE_TOKEN }}
         run: |
           pnpm tauri android build --apk --target aarch64 -- --features vendored-openssl
           V='${{ needs.resolve.outputs.version }}'
@@ -191,6 +200,8 @@ jobs:
         env:
           VITE_WALLETCONNECT_PROJECT_ID: ${{ vars.VITE_WALLETCONNECT_PROJECT_ID }}
           VITE_DEFAULT_ASP_URL: ${{ vars.VITE_DEFAULT_ASP_URL }}
+          AVARK_SUBMITPACKAGE_URL: ${{ vars.AVARK_SUBMITPACKAGE_URL }}
+          AVARK_SUBMITPACKAGE_TOKEN: ${{ secrets.AVARK_SUBMITPACKAGE_TOKEN }}
         run: |
           pnpm tauri android build --apk --target armv7 -- --features vendored-openssl
           V='${{ needs.resolve.outputs.version }}'

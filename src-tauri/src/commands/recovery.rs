@@ -588,17 +588,38 @@ pub(crate) struct OfflineBroadcastCtx {
     pub(crate) blockchain: ark::EsploraBlockchain,
     pub(crate) wallet: Arc<ark::ArkWallet>,
     pub(crate) timeout: Duration,
-    /// Optional REST endpoint that wraps Bitcoin Core's `submitpackage` RPC.
-    /// When present, `broadcast_package` POSTs the parent+child hex pair to it
-    /// instead of looping through esplora's single-tx broadcast (which can't
-    /// accept zero-fee TRUC + P2A packages — see `upstream-submitpackage-issue.md`).
     pub(crate) submitpackage: Option<SubmitpackageEndpoint>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SubmitpackageEndpoint {
     pub(crate) url: String,
-    pub(crate) token: String,
+    pub(crate) token: Option<String>,
+}
+
+const DEFAULT_SUBMITPACKAGE_URL: Option<&str> = option_env!("AVARK_SUBMITPACKAGE_URL");
+const DEFAULT_SUBMITPACKAGE_TOKEN: Option<&str> = option_env!("AVARK_SUBMITPACKAGE_TOKEN");
+
+/// An endpoint needs a URL; the token is optional.
+fn endpoint_from_parts(
+    url: Option<String>,
+    token: Option<String>,
+) -> Option<SubmitpackageEndpoint> {
+    let url = url.filter(|u| !u.is_empty())?;
+    let token = token.filter(|t| !t.is_empty());
+    Some(SubmitpackageEndpoint { url, token })
+}
+
+pub(crate) fn default_submitpackage_endpoint(
+    network: bitcoin::Network,
+) -> Option<SubmitpackageEndpoint> {
+    if network != bitcoin::Network::Bitcoin {
+        return None;
+    }
+    endpoint_from_parts(
+        DEFAULT_SUBMITPACKAGE_URL.map(str::to_owned),
+        DEFAULT_SUBMITPACKAGE_TOKEN.map(str::to_owned),
+    )
 }
 
 const OFFLINE_BROADCAST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -630,16 +651,30 @@ async fn sync_wallet_with_retry(wallet: &ark::ArkWallet) -> Result<(), String> {
     Err(last_error)
 }
 
-/// Read the configured submitpackage endpoint from settings, if both URL and
-/// token are present. Returns `None` if either is missing — broadcast then
-/// falls back to esplora's sequential `POST /tx` path.
-async fn read_submitpackage_endpoint(app: &tauri::AppHandle) -> Option<SubmitpackageEndpoint> {
-    let state = app.state::<SettingsLock>();
-    let _lock = state.0.read().await;
-    let settings = crate::read_settings(app).await.ok()?;
-    let url = settings.submitpackage_url.filter(|u| !u.is_empty())?;
-    let token = settings.submitpackage_token.filter(|t| !t.is_empty())?;
-    Some(SubmitpackageEndpoint { url, token })
+/// Resolve the submitpackage endpoint: a user override in settings wins;
+/// otherwise the compiled-in default. `None` means broadcast falls back to
+/// esplora's sequential `POST /tx` path.
+async fn read_submitpackage_endpoint(
+    app: &tauri::AppHandle,
+    network: bitcoin::Network,
+) -> Option<SubmitpackageEndpoint> {
+    let settings = {
+        let state = app.state::<SettingsLock>();
+        let _lock = state.0.read().await;
+        match crate::read_settings(app).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                warn!(error = %e, "failed to read settings for submitpackage endpoint; using the compiled-in default");
+                None
+            }
+        }
+    };
+    if let Some(s) = settings {
+        if let Some(custom) = endpoint_from_parts(s.submitpackage_url, s.submitpackage_token) {
+            return Some(custom);
+        }
+    }
+    default_submitpackage_endpoint(network)
 }
 
 /// Build the broadcast context. When a connected wallet exists in
@@ -658,14 +693,13 @@ async fn build_offline_broadcast_ctx(
         guard.as_ref().map(|ws| Arc::clone(&ws.wallet))
     };
 
-    let submitpackage = read_submitpackage_endpoint(app).await;
-
     if let Some(wallet) = connected_wallet {
         let wallet_data = super::wallet::read_wallet_data(app).await?;
         let network = wallet_data
             .network
             .parse::<bitcoin::Network>()
             .map_err(|e| AppError::Wallet(format!("Invalid network in wallet.json: {e}")))?;
+        let submitpackage = read_submitpackage_endpoint(app, network).await;
         let custom_esplora = {
             let state = app.state::<SettingsLock>();
             let _lock = state.0.read().await;
@@ -754,7 +788,7 @@ async fn build_from_disk_broadcast_ctx(
     let bdk_wallet = ark_bdk_wallet::Wallet::new_from_xpriv(xpriv, secp, network, &esplora_url, db)
         .map_err(|e| AppError::Wallet(format!("Failed to create BDK wallet: {e}")))?;
 
-    let submitpackage = read_submitpackage_endpoint(app).await;
+    let submitpackage = read_submitpackage_endpoint(app, network).await;
 
     Ok(OfflineBroadcastCtx {
         blockchain,
@@ -780,10 +814,13 @@ async fn broadcast_via_submitpackage(
         .build()
         .map_err(|e| AppError::Wallet(format!("Failed to build HTTP client: {e}")))?;
 
-    let resp = client
+    let mut request = client
         .post(&endpoint.url)
-        .bearer_auth(&endpoint.token)
-        .json(&serde_json::json!({ "hex": hex }))
+        .json(&serde_json::json!({ "hex": hex }));
+    if let Some(token) = &endpoint.token {
+        request = request.bearer_auth(token);
+    }
+    let resp = request
         .send()
         .await
         .map_err(|e| AppError::Wallet(format!("submitpackage request failed: {e}")))?;
@@ -1914,6 +1951,34 @@ mod tests {
     fn anchor_fee_zero_when_inputs_equal_outputs() {
         let (psbt, child) = one_input_one_output_tx(1000, 1000);
         assert_eq!(compute_anchor_fee(&psbt, &child), 0);
+    }
+
+    #[test]
+    fn endpoint_requires_url_token_optional() {
+        let with_token = endpoint_from_parts(Some("https://x".into()), Some("tok".into()))
+            .expect("url + token is a full endpoint");
+        assert_eq!(with_token.token.as_deref(), Some("tok"));
+
+        let tokenless = endpoint_from_parts(Some("https://x".into()), None)
+            .expect("url without token is a valid endpoint");
+        assert_eq!(tokenless.token, None);
+        let empty_token = endpoint_from_parts(Some("https://x".into()), Some("".into()))
+            .expect("empty token means tokenless");
+        assert_eq!(empty_token.token, None);
+
+        assert!(endpoint_from_parts(None, Some("tok".into())).is_none());
+        assert!(endpoint_from_parts(Some("".into()), Some("tok".into())).is_none());
+    }
+
+    #[test]
+    fn default_endpoint_is_mainnet_only() {
+        // The baked-in default fronts a mainnet Core node, so it must never be
+        // handed to a test-network wallet — regardless of whether THIS build
+        // compiled one in (option_env! is None under `cargo test`, but the
+        // network gate holds either way).
+        assert!(default_submitpackage_endpoint(bitcoin::Network::Signet).is_none());
+        assert!(default_submitpackage_endpoint(bitcoin::Network::Testnet).is_none());
+        assert!(default_submitpackage_endpoint(bitcoin::Network::Regtest).is_none());
     }
 
     #[test]

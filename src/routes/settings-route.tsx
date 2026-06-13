@@ -20,6 +20,7 @@ interface SettingsData {
   esplora_url: string | null;
   submitpackage_url?: string | null;
   submitpackage_token_configured?: boolean;
+  submitpackage_default_url?: string | null;
 }
 
 interface RecoveryCacheStatus {
@@ -323,10 +324,11 @@ export function SettingsRoute() {
           </div>
         </div>
         <EsploraSelector
-          key={settings?.esplora_url ?? ""}
+          key={`esplora-${settings?.esplora_url ?? ""}`}
           network={settings?.network}
           initialUrl={settings?.esplora_url ?? ""}
         />
+        
         <div className="rounded-2xl theme-card p-4 mt-3 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -379,8 +381,9 @@ export function SettingsRoute() {
         </div>
 
         <PackageBroadcastEndpoint
-          key={settings?.submitpackage_url ?? ""}
+          key={`submitpackage-${settings?.submitpackage_url ?? ""}`}
           configuredUrl={settings?.submitpackage_url ?? null}
+          defaultUrl={settings?.submitpackage_default_url ?? null}
           tokenConfigured={settings?.submitpackage_token_configured ?? false}
           onSaved={() => void fetchSettings()}
         />
