@@ -22,6 +22,7 @@ dotenvy = "0.15"
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
 # Proxy SDK fetches through Rust so mobile WebView origins aren't blocked by
 # api.lendaswap.com's CORS whitelist (desktop localhost:1420 is allowed; the
 # Android `http://tauri.localhost` and iOS `tauri://localhost` origins are not).
@@ -32,10 +33,10 @@ thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false, features = ["sync", "fs", "time"] }
 
 # Ark protocol
-ark-client = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.2", default-features = false, features = ["tls-webpki-roots", "sqlite"] }
-ark-core = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.2" }
-ark-bdk-wallet = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.2" }
-ark-grpc = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.2" }
+ark-client = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.3", default-features = false, features = ["tls-webpki-roots", "sqlite"] }
+ark-core = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.3" }
+ark-bdk-wallet = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.3" }
+ark-grpc = { git = "https://github.com/arkade-os/rust-sdk.git", tag = "v0.9.3" }
 
 # Bitcoin / BIP39
 bip39 = { version = "2", features = ["rand", "zeroize"] }

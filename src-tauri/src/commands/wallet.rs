@@ -423,36 +423,28 @@ pub async fn is_wallet_loaded(app: tauri::AppHandle) -> bool {
     loaded
 }
 
-#[tauri::command]
-pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
-    info!("connecting wallet to ASP");
-
-    let creation_lock = app.state::<WalletCreationLock>();
-    let _guard = creation_lock.0.lock().await;
-
-    let global = app.state::<GlobalWalletState>();
-    if global.0.read().await.is_some() {
-        debug!("Ark client already initialized, skipping connect");
-        return Ok(());
-    }
-
-    let wallet_data = read_wallet_data(&app).await?;
-    let xpriv = derive_wallet_xpriv(&app, &wallet_data)?;
+/// Build the Ark client from the on-disk wallet data and store it in
+/// `GlobalWalletState`
+async fn reconnect_wallet_client(app: &tauri::AppHandle) -> Result<(), AppError> {
+    let wallet_data = read_wallet_data(app).await?;
+    let xpriv = derive_wallet_xpriv(app, &wallet_data)?;
     let custom_esplora = {
         let state = app.state::<SettingsLock>();
         let _lock = state.0.read().await;
-        read_settings(&app).await.ok().and_then(|s| s.esplora_url)
+        read_settings(app).await.ok().and_then(|s| s.esplora_url)
     };
 
     let (client, wallet_arc, swap_storage, key_provider) =
-        build_ark_client(&app, xpriv, &wallet_data.asp_url, custom_esplora.as_deref()).await?;
+        build_ark_client(app, xpriv, &wallet_data.asp_url, custom_esplora.as_deref()).await?;
 
-    let sync_cancel = spawn_onchain_sync(Arc::clone(&wallet_arc), &app).await;
+    let sync_cancel = spawn_onchain_sync(Arc::clone(&wallet_arc), app).await;
     let client_arc = Arc::new(client);
     let swap_storage_arc = Arc::clone(&swap_storage);
     let client_for_recovery = Arc::clone(&client_arc);
     let key_provider_for_recovery = Arc::clone(&key_provider);
     let (wallet_cancel, cancel_rx) = tokio::sync::watch::channel(());
+
+    let global = app.state::<GlobalWalletState>();
     *global.0.write().await = Some(AppWalletState {
         client: Arc::clone(&client_arc),
         wallet: wallet_arc,
@@ -466,13 +458,99 @@ pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
         client_for_recovery,
         swap_storage_arc,
         key_provider_for_recovery,
-        &app,
+        app,
         cancel_rx,
     );
     spawn_unilateral_exit_cache_refresh(app.clone(), Arc::clone(&client_arc));
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn connect_wallet(app: tauri::AppHandle) -> Result<(), AppError> {
+    info!("connecting wallet to ASP");
+
+    let creation_lock = app.state::<WalletCreationLock>();
+    let _guard = creation_lock.0.lock().await;
+
+    let global = app.state::<GlobalWalletState>();
+    if global.0.read().await.is_some() {
+        debug!("Ark client already initialized, skipping connect");
+        return Ok(());
+    }
+
+    reconnect_wallet_client(&app).await?;
+
     info!("wallet connected successfully");
     Ok(())
+}
+
+/// Switch the wallet to a different ASP.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn switch_asp(app: tauri::AppHandle, url: String) -> Result<crate::AspInfo, AppError> {
+    info!(url = %url, "switching ASP");
+
+    let creation_lock = app.state::<WalletCreationLock>();
+    let _guard = creation_lock.0.lock().await;
+
+    // Probe the target ASP (validates URL + connects, persists nothing).
+    let probed = crate::probe_asp_server(&url).await?;
+
+    // Hard-block a network change — funds live on the current ASP's network
+    let current_network = match read_wallet_data(&app).await {
+        Ok(w) if !w.network.is_empty() => Some(w.network),
+        _ => {
+            let state = app.state::<SettingsLock>();
+            let _lock = state.0.read().await;
+            read_settings(&app).await?.network
+        }
+    };
+    let current = current_network.as_deref().ok_or_else(|| {
+        AppError::Asp(
+            "Can't determine the wallet's current network, so the ASP switch is blocked to \
+             avoid a network mismatch that could strand funds. Reconnect and try again."
+                .into(),
+        )
+    })?;
+    if current != probed.network {
+        return Err(AppError::Asp(format!(
+            "Network mismatch: current ASP is on {current}, the new ASP is on {}. \
+             Switching networks would strand your funds.",
+            probed.network
+        )));
+    }
+
+    // Persist the new ASP to settings.json (Settings display) and wallet.json
+    {
+        let state = app.state::<SettingsLock>();
+        let _lock = state.0.write().await;
+        let mut settings = read_settings(&app).await?;
+        settings.asp_url = Some(url.clone());
+        settings.network = Some(probed.network.clone());
+        write_settings(&app, &settings).await?;
+    }
+    let wallet_data = WalletData {
+        asp_url: url.clone(),
+        network: probed.network.clone(),
+    };
+    let path = wallet_path(&app)?;
+    tokio::fs::write(&path, serde_json::to_string_pretty(&wallet_data)?).await?;
+
+    // Tear down the old client (drops its sync/recovery tasks), then rebuild
+    // against the new ASP.
+    {
+        let global = app.state::<GlobalWalletState>();
+        *global.0.write().await = None;
+    }
+    if let Err(e) = reconnect_wallet_client(&app).await {
+        warn!(error = %e, "ASP switched in settings but reconnect failed");
+        return Err(AppError::Asp(format!(
+            "ASP updated, but reconnecting failed: {e}. Restart the app to retry."
+        )));
+    }
+
+    info!(network = %probed.network, "ASP switched successfully");
+    Ok(probed)
 }
 
 #[tauri::command]

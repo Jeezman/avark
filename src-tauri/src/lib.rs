@@ -191,16 +191,14 @@ async fn set_onboarding_seen(app: tauri::AppHandle) -> Result<(), AppError> {
 }
 
 #[derive(Serialize)]
-struct AspInfo {
-    network: String,
-    version: String,
+pub(crate) struct AspInfo {
+    pub(crate) network: String,
+    pub(crate) version: String,
 }
 
-#[tauri::command]
-async fn connect_asp(app: tauri::AppHandle, url: String) -> Result<AspInfo, AppError> {
-    info!(url = %url, "connecting to ASP");
-
-    let parsed = url::Url::parse(&url).map_err(|e| AppError::Asp(format!("Invalid URL: {e}")))?;
+/// Validate `url` and test-connect to the ASP, returning its network + version.
+pub(crate) async fn probe_asp_server(url: &str) -> Result<AspInfo, AppError> {
+    let parsed = url::Url::parse(url).map_err(|e| AppError::Asp(format!("Invalid URL: {e}")))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(AppError::Asp("URL scheme must be http or https".into()));
     }
@@ -208,7 +206,7 @@ async fn connect_asp(app: tauri::AppHandle, url: String) -> Result<AspInfo, AppE
         return Err(AppError::Asp("URL must include a host".into()));
     }
 
-    let mut client = ark_grpc::Client::new(url.clone());
+    let mut client = ark_grpc::Client::new(url.to_string());
 
     tokio::time::timeout(std::time::Duration::from_secs(10), client.connect())
         .await
@@ -220,19 +218,35 @@ async fn connect_asp(app: tauri::AppHandle, url: String) -> Result<AspInfo, AppE
         .map_err(|_| AppError::Asp("Server info request timed out".into()))?
         .map_err(|e| AppError::Asp(format!("Failed to get server info: {e}")))?;
 
+    Ok(AspInfo {
+        network: info.network.to_string(),
+        version: info.version,
+    })
+}
+
+#[tauri::command]
+async fn connect_asp(app: tauri::AppHandle, url: String) -> Result<AspInfo, AppError> {
+    info!(url = %url, "connecting to ASP");
+
+    let info = probe_asp_server(&url).await?;
+
     info!(network = %info.network, version = %info.version, "ASP connected");
 
     let state = app.state::<SettingsLock>();
     let _lock = state.0.write().await;
     let mut settings = read_settings(&app).await?;
     settings.asp_url = Some(url);
-    settings.network = Some(info.network.to_string());
+    settings.network = Some(info.network.clone());
     write_settings(&app, &settings).await?;
 
-    Ok(AspInfo {
-        network: info.network.to_string(),
-        version: info.version,
-    })
+    Ok(info)
+}
+
+/// Test-connect to a candidate ASP without persisting anything
+#[tauri::command]
+async fn probe_asp(url: String) -> Result<AspInfo, AppError> {
+    info!(url = %url, "probing ASP");
+    probe_asp_server(&url).await
 }
 
 // ── App entry point ─────────────────────────────────────────────────────
@@ -254,6 +268,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(secure_storage::init())
         .manage(SettingsLock(RwLock::new(())))
         .manage(GlobalWalletState(RwLock::new(None)))
@@ -291,6 +306,7 @@ pub fn run() {
             has_seen_onboarding,
             set_onboarding_seen,
             connect_asp,
+            probe_asp,
             // Settings
             commands::settings::settings,
             commands::settings::set_theme,
@@ -313,6 +329,7 @@ pub fn run() {
             commands::wallet::load_wallet_local,
             commands::wallet::is_wallet_loaded,
             commands::wallet::connect_wallet,
+            commands::wallet::switch_asp,
             commands::wallet::delete_wallet,
             // Wallet data
             commands::wallet::get_balance,

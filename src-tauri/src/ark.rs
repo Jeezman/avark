@@ -177,8 +177,16 @@ impl Blockchain for EsploraBlockchain {
         let estimates = esplora_retry(|| self.client.get_fee_estimates())
             .await
             .map_err(Error::consumer)?;
-        // Target ~6 blocks confirmation, fall back to 1.0 sat/vB
-        Ok(estimates.get(&6).copied().unwrap_or(1.0))
+
+        // Target ~6 blocks. If esplora didn't return that exact target, use the
+        // nearest available target rather than collapsing to 1.0 sat/vB, which
+        // would under-price a sweep in a busy mempool. Only a truly empty
+        // estimate set falls back to 1.0.
+        let nearest = estimates
+            .iter()
+            .min_by_key(|(target, _)| (**target as i64 - 6).abs())
+            .map(|(_, rate)| *rate);
+        Ok(estimates.get(&6).copied().or(nearest).unwrap_or(1.0))
     }
 
     /// Broadcasts transactions sequentially. **Not atomic**: Esplora has no

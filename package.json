@@ -22,6 +22,7 @@
     "@lendasat/lendaswap-sdk-pure": "^0.2.24",
     "@tanstack/react-router": "^1.166.3",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-http": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@walletconnect/sign-client": "^2.23.9",

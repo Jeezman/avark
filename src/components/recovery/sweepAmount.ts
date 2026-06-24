@@ -1,5 +1,8 @@
-// The SDK's `send_on_chain` uses a fixed 1000 sat internal fee; matching it
-// here keeps the form's max-after-fee suggestion realistic.
+// Rough fee buffer for the form's "max after fee" *prefill* only. The backend
+// sizes the real fee from the live fee rate and clamps the sent amount to
+// whatever's left after it, so this no longer has to be exact — it just seeds a
+// sensible default the user can edit. (In a high-fee mempool the actual amount
+// received may be a little lower than this suggests.)
 export const SWEEP_FEE_BUFFER_SATS = 1000;
 
 /** Most sats that can leave a sweep of `totalSat` worth of mature outputs. */

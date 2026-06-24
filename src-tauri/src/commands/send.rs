@@ -360,7 +360,11 @@ pub async fn send_onchain(
         Arc::clone(&ws.client)
     };
 
-    let btc_addr = parse_onchain_address(&address, client.server_info.network)?;
+    let network = client
+        .server_info()
+        .map_err(|e| AppError::Wallet(format!("Failed to read ASP server info: {e}")))?
+        .network;
+    let btc_addr = parse_onchain_address(&address, network)?;
 
     info!(address = %address, amount_sat = amount_sat, "offboarding to onchain");
 
@@ -405,7 +409,11 @@ pub async fn estimate_onchain_send_fee(
         Arc::clone(&ws.client)
     };
 
-    let btc_addr = parse_onchain_address(&address, client.server_info.network)?;
+    let network = client
+        .server_info()
+        .map_err(|e| AppError::Wallet(format!("Failed to read ASP server info: {e}")))?
+        .network;
+    let btc_addr = parse_onchain_address(&address, network)?;
 
     let mut last_err = String::new();
     for attempt in 1..=FEE_ESTIMATE_MAX_RETRIES {
