@@ -121,6 +121,10 @@ pnpm build
 
 # Run Rust tests
 cargo test --manifest-path src-tauri/Cargo.toml
+
+## Logging (while connected to a device)
+```bash
+adb logcat -c && adb logcat -s RustStdoutStderr
 ```
 
 ## Recommended IDE Setup
