@@ -8,6 +8,7 @@ import { PinSetupFlow, PinDisableFlow, usePinLock } from "../context/PinLockCont
 import { useFiat } from "../context/FiatContext";
 import { useWallet } from "../context/WalletContext";
 import { formatCacheTime } from "../utils/format";
+import AspConfig from "../AspConfig";
 import { EsploraSelector } from "../components/settings/EsploraSelector";
 import { FiatTickerCard } from "../components/settings/FiatTickerCard";
 import { NsecBackup } from "../components/settings/NsecBackup";
@@ -67,6 +68,7 @@ export function SettingsRoute() {
     refreshRate: refreshFiatRate,
   } = useFiat();
   const [pinFlow, setPinFlow] = useState<"none" | "setup" | "disable">("none");
+  const [switchingAsp, setSwitchingAsp] = useState(false);
   const [maxAttempts, setMaxAttempts] = useState(10);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [recoveryCache, setRecoveryCache] = useState<RecoveryCacheStatus | null>(null);
@@ -170,6 +172,21 @@ export function SettingsRoute() {
       <PinDisableFlow
         onComplete={() => { setPinFlow("none"); void refreshPinStatus(); }}
         onCancel={() => setPinFlow("none")}
+      />
+    );
+  }
+
+  if (switchingAsp && settings?.asp_url) {
+    return (
+      <AspConfig
+        mode="switch"
+        currentUrl={settings.asp_url}
+        currentNetwork={settings.network}
+        onSwitched={() => {
+          setSwitchingAsp(false);
+          void fetchSettings();
+        }}
+        onCancel={() => setSwitchingAsp(false)}
       />
     );
   }
@@ -305,7 +322,17 @@ export function SettingsRoute() {
         <h2 className="text-xs font-semibold theme-text-muted uppercase tracking-wider mb-3">Network</h2>
         <div className="rounded-2xl theme-card p-4 space-y-3">
           <div>
-            <p className="text-xs theme-text-muted mb-0.5">ASP URL</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs theme-text-muted mb-0.5">ASP URL</p>
+              {settings?.asp_url && (
+                <button
+                  onClick={() => setSwitchingAsp(true)}
+                  className="shrink-0 text-xs font-medium theme-accent hover:opacity-80 transition-opacity"
+                >
+                  Change
+                </button>
+              )}
+            </div>
             <p className="text-sm font-mono break-all">{settings?.asp_url ?? "—"}</p>
           </div>
           <div>

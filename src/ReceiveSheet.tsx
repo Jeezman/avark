@@ -11,6 +11,8 @@ import { parseSatAmount } from './utils/amount';
 import { formatSats } from './utils/format';
 import { launchConfetti } from './utils/confetti';
 import { playSuccessSound, triggerHaptic } from './utils/receiveFeedback';
+import { AmountField } from './components/AmountField';
+import { RAIL_META, type Rail } from './components/rails';
 
 interface ReceiveSheetProps {
   open: boolean;
@@ -34,6 +36,8 @@ interface ReceivedPayment {
   type: ReceiveType;
   timestamp: Date;
 }
+
+const ACCENT = '#bef264';
 
 /** Convert sats to BTC string using integer math (no floating point). */
 function satsToBtc(sats: number): string {
@@ -64,86 +68,198 @@ function truncateMiddle(str: string, headLen = 12, tailLen = 8): string {
   return `${str.slice(0, headLen)}...${str.slice(-tailLen)}`;
 }
 
-function CopyRow({
-  label,
-  value,
-  truncated,
-}: {
-  label: string;
-  value: string;
-  truncated?: string;
-}) {
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success(`${label} copied`);
-    } catch {
-      toast.error('Failed to copy');
-    }
-  }, [label, value]);
+/** Copy to clipboard with a toast. */
+async function copyText(value: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success(`${label} copied`);
+  } catch {
+    toast.error('Failed to copy');
+  }
+}
 
-  const handleShare = useCallback(async () => {
-    // iOS WKWebView exposes navigator.share; Android WebView does not, so we
-    // fall back to a Tauri command that fires an ACTION_SEND intent.
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: label, text: value });
-        return;
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') return;
-      }
-    }
+/**
+ * Share via the native sheet. iOS WKWebView exposes navigator.share; Android
+ * WebView does not, so we fall back to a Tauri command that fires an
+ * ACTION_SEND intent.
+ */
+async function shareText(title: string, value: string) {
+  if (navigator.share) {
     try {
-      await invoke('share_text', { text: value });
-    } catch {
-      toast.error('Failed to share');
+      await navigator.share({ title, text: value });
+      return;
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
     }
-  }, [label, value]);
+  }
+  try {
+    await invoke('share_text', { text: value });
+  } catch {
+    toast.error('Failed to share');
+  }
+}
 
+// ── Format rows ────────────────────────────────────────────────────────────
+const RAILS: Rail[] = ['ark', 'bitcoin', 'lightning'];
+
+const RAIL_CAPTION: Record<Rail, string> = {
+  ark: 'Instant Ark transfer — also scannable by any bitcoin wallet',
+  bitcoin: 'Standard on-chain Bitcoin — confirms in ~10 minutes',
+  lightning: 'Instant Lightning payment',
+};
+
+/** White "minted note" QR card with a rail-tinted glow and corner ticks. */
+function MintedQR({ value, accent, soft }: { value: string; accent: string; soft: string }) {
   return (
-    <div className="flex w-full items-center gap-2 rounded-xl theme-card px-4 py-2.5">
-      <button
-        onClick={handleCopy}
-        className="flex flex-1 min-w-0 items-center justify-between gap-3 text-left"
-      >
-        <div className="min-w-0">
-          <p className="text-[10px] theme-text-muted mb-0.5">{label}</p>
-          <p className="font-mono text-xs theme-text-secondary truncate">
-            {truncated ?? truncateMiddle(value)}
-          </p>
-        </div>
-        <svg
-          className="h-4 w-4 shrink-0 theme-text-faint"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+    <div className="relative flex justify-center">
+      <div
+        className="pointer-events-none absolute -inset-6 rounded-full"
+        style={{ background: `radial-gradient(circle, ${soft} 0%, transparent 68%)` }}
+      />
+      <div className="relative">
+        <div
+          className="rounded-[28px] bg-white p-5"
+          style={{ boxShadow: '0 18px 50px -12px rgba(0,0,0,0.6)' }}
         >
+          <QRCode
+            value={value}
+            size={320}
+            level="L"
+            style={{ height: 'auto', maxWidth: '208px', width: '100%' }}
+          />
+        </div>
+        {(
+          [
+            'left-0 top-0 border-l-2 border-t-2 rounded-tl-md',
+            'right-0 top-0 border-r-2 border-t-2 rounded-tr-md',
+            'left-0 bottom-0 border-l-2 border-b-2 rounded-bl-md',
+            'right-0 bottom-0 border-r-2 border-b-2 rounded-br-md',
+          ] as const
+        ).map((pos) => (
+          <span
+            key={pos}
+            className={`pointer-events-none absolute h-5 w-5 ${pos}`}
+            style={{ margin: '-7px', borderColor: accent }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Tap-to-copy address line with copy + share affordances. */
+function AddressBar({ value, label }: { value: string; label: string }) {
+  return (
+    <div
+      className="flex w-full items-center gap-2 rounded-2xl px-4 py-2.5"
+      style={{ background: 'var(--color-bg-card)' }}
+    >
+      <button
+        onClick={() => void copyText(value, label)}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      >
+        <span className="truncate font-mono text-xs theme-text-secondary">
+          {truncateMiddle(value, 16, 10)}
+        </span>
+      </button>
+      <button
+        onClick={() => void copyText(value, label)}
+        aria-label={`Copy ${label}`}
+        className="shrink-0 p-1.5 theme-text-faint transition-colors active:theme-accent"
+      >
+        <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
           <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
         </svg>
       </button>
       <button
-        onClick={handleShare}
+        onClick={() => void shareText(label, value)}
         aria-label={`Share ${label}`}
-        className="shrink-0 p-1 theme-text-faint hover:theme-text-muted transition-colors"
+        className="shrink-0 p-1.5 theme-text-faint transition-colors active:theme-accent"
       >
-        <svg
-          className="h-4 w-4"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
+        <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 3v12" />
           <path d="M8 7l4-4 4 4" />
           <path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
         </svg>
       </button>
+    </div>
+  );
+}
+
+/** The Lightning tab before an invoice exists: prompt, loading, error, or CTA.
+ *  Generation stays an explicit user action — each call mints a real Boltz
+ *  swap (see useLnInvoice), so it must never fire on tab-select alone. */
+function LightningPrompt({
+  hasAmount,
+  loading,
+  error,
+  onGenerate,
+}: {
+  hasAmount: boolean;
+  loading: boolean;
+  error: string | null;
+  onGenerate: () => void;
+}) {
+  const AMBER = '#fbbf24';
+  return (
+    <div
+      className="flex w-full flex-col items-center rounded-3xl px-6 py-10 text-center"
+      style={{ background: 'var(--color-bg-card)', border: '1px dashed rgba(251,191,36,0.25)' }}
+    >
+      <span
+        className="grid h-14 w-14 place-items-center rounded-2xl"
+        style={{ background: 'rgba(251,191,36,0.12)' }}
+      >
+        {loading ? (
+          <svg className="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke={AMBER} strokeWidth="4" />
+            <path className="opacity-75" fill={AMBER} d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        ) : (
+          <svg className="h-6 w-6" viewBox="0 0 24 24" fill={AMBER}>
+            <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
+          </svg>
+        )}
+      </span>
+
+      {loading ? (
+        <p className="mt-4 text-sm theme-text-secondary">Creating your invoice…</p>
+      ) : error ? (
+        <>
+          <p className="mt-4 text-sm theme-danger">{error}</p>
+          {hasAmount && (
+            <button
+              onClick={onGenerate}
+              className="mt-4 rounded-xl px-5 py-2.5 text-xs font-semibold"
+              style={{ background: 'rgba(251,191,36,0.12)', color: AMBER }}
+            >
+              Try again
+            </button>
+          )}
+        </>
+      ) : hasAmount ? (
+        <>
+          <p className="mt-4 text-sm theme-text-secondary">
+            Create a Lightning invoice for this amount.
+          </p>
+          <button
+            onClick={onGenerate}
+            className="mt-4 flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold active:scale-95"
+            style={{ background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#1a1a1a' }}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
+            </svg>
+            Create invoice
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="mt-4 text-sm theme-text-secondary">Lightning needs an amount.</p>
+          <p className="mt-1 text-xs theme-text-muted">Enter how much to request above.</p>
+        </>
+      )}
     </div>
   );
 }
@@ -404,6 +520,7 @@ function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState('');
+  const [tab, setTab] = useState<Rail>('ark');
   const [receivedPayments, setReceivedPayments] = useState<ReceivedPayment[]>([]);
   const [currentPaymentIndex, setCurrentPaymentIndex] = useState(0);
   const initialBoardingSat = useRef<number | null>(null);
@@ -414,15 +531,6 @@ function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
 
   const lnInvoiceForQr =
     ln.invoice && ln.invoiceAmount === amountSats ? ln.invoice : null;
-
-  const qrValue = addresses
-    ? buildBip21(
-        addresses.boarding_address,
-        addresses.ark_address,
-        amountSats,
-        lnInvoiceForQr,
-      )
-    : null;
 
   const currentPayment = receivedPayments[currentPaymentIndex] ?? null;
   const showConfirmation = currentPayment !== null;
@@ -548,150 +656,177 @@ function ReceiveSheetContent({ onClose }: { onClose: () => void }) {
     );
   }
 
-  return (
-    <>
-      {loading && (
-        <div className="flex flex-col items-center py-12">
-          <svg
-            className="h-8 w-8 animate-spin text-lime-300"
-            viewBox="0 0 24 24"
-            fill="none"
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <div className="relative h-16 w-16">
+          <div
+            className="absolute inset-0 rounded-2xl"
+            style={{
+              background:
+                'conic-gradient(from 0deg, rgba(190,242,100,0.5), transparent 65%)',
+              animation: 'spin 1s linear infinite',
+            }}
+          />
+          <div
+            className="absolute inset-[3px] grid place-items-center rounded-2xl"
+            style={{ background: 'var(--color-bg-secondary, #1f2937)' }}
           >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ background: ACCENT }}
             />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
-          </svg>
+          </div>
         </div>
-      )}
+        <p className="mt-4 text-xs theme-text-muted">Preparing your codes…</p>
+      </div>
+    );
+  }
 
-      {error && (
-        <div className="rounded-2xl theme-danger-bg p-6 text-center">
-          <p className="text-sm theme-danger">{error}</p>
-        </div>
-      )}
+  if (error) {
+    return (
+      <div className="rounded-2xl theme-danger-bg p-6 text-center">
+        <p className="text-sm theme-danger">{error}</p>
+      </div>
+    );
+  }
 
-      {addresses && qrValue && (
-        <div className="flex flex-col items-center">
-          <div className="w-full mb-4">
-            <label className="block text-xs theme-text-muted mb-1.5">
-              Amount (optional)
-            </label>
-            <div className="flex items-center gap-2 rounded-xl theme-card px-4 py-2.5">
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="0"
-                value={amountInput}
-                onChange={handleAmountChange}
-                className="flex-1 bg-transparent text-sm font-medium theme-text outline-none placeholder:opacity-20 tabular-nums"
+  if (!addresses) return null;
+
+  const hasAmount = amountSats !== null && amountSats > 0;
+  const amount = hasAmount ? (amountSats as number) : null;
+  const meta = RAIL_META[tab];
+
+  const railQr =
+    tab === 'ark'
+      ? buildBip21(addresses.boarding_address, addresses.ark_address, amount, null)
+      : tab === 'bitcoin'
+        ? `bitcoin:${addresses.boarding_address}${
+            amount !== null ? `?amount=${satsToBtc(amount)}` : ''
+          }`
+        : lnInvoiceForQr;
+  const railAddress =
+    tab === 'ark'
+      ? addresses.ark_address
+      : tab === 'bitcoin'
+        ? addresses.boarding_address
+        : lnInvoiceForQr;
+  const railLabel =
+    tab === 'ark' ? 'Ark address' : tab === 'bitcoin' ? 'Bitcoin address' : 'Lightning invoice';
+
+  return (
+    <div className="flex flex-col items-center">
+      {/* ── Amount (shared with Send) ──────────────────────────── */}
+      <div className="mb-4 w-full">
+        <AmountField
+          label="Request amount"
+          hint={
+            <span
+              className="text-[10px]"
+              style={{ color: tab === 'lightning' ? '#fbbf24' : 'var(--color-text-faint)' }}
+            >
+              {tab === 'lightning' ? 'required' : 'optional'}
+            </span>
+          }
+          value={amountInput}
+          onChange={handleAmountChange}
+          accent={meta.accent}
+          footer={
+            hasAmount ? (
+              <div className="mt-2 flex items-center justify-between px-1 text-[11px] tabular-nums">
+                <span className="font-semibold" style={{ color: meta.accent }}>
+                  {amountFiat ?? ' '}
+                </span>
+                <span className="theme-text-faint">{satsToBtc(amount as number)} BTC</span>
+              </div>
+            ) : undefined
+          }
+        />
+      </div>
+
+      {/* ── Rail tabs ──────────────────────────────────────────── */}
+      <div
+        className="mb-5 grid w-full grid-cols-3 gap-1 rounded-2xl p-1"
+        style={{ background: 'var(--color-bg-card)' }}
+        role="tablist"
+      >
+        {RAILS.map((r) => {
+          const m = RAIL_META[r];
+          const active = tab === r;
+          return (
+            <button
+              key={r}
+              role="tab"
+              aria-selected={active}
+              onClick={() => setTab(r)}
+              className="flex flex-col items-center gap-1 rounded-xl py-2 transition-all active:scale-95"
+              style={active ? { background: m.soft } : undefined}
+            >
+              <svg
+                className="h-[18px] w-[18px]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ color: active ? m.accent : 'var(--color-text-faint)' }}
+              >
+                {m.icon}
+              </svg>
+              <span
+                className="text-[11px] font-semibold"
+                style={{ color: active ? m.accent : 'var(--color-text-muted)' }}
+              >
+                {m.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Active rail ────────────────────────────────────────── */}
+      {tab === 'lightning' && !lnInvoiceForQr ? (
+        <LightningPrompt
+          hasAmount={hasAmount}
+          loading={ln.loading}
+          error={ln.error}
+          onGenerate={() => amount !== null && ln.generate(amount)}
+        />
+      ) : (
+        railQr &&
+        railAddress && (
+          <>
+            <MintedQR value={railQr} accent={meta.accent} soft={meta.soft} />
+
+            <div className="mb-4 mt-4 flex items-center justify-center gap-1.5 px-2 text-center">
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ background: meta.accent }}
               />
-              <span className="text-xs theme-text-muted">sats</span>
+              <p className="text-[11px] theme-text-muted">{RAIL_CAPTION[tab]}</p>
             </div>
-            {amountSats !== null && amountSats > 0 && (
-              <div className="mt-1 flex justify-between gap-2">
-                {amountFiat ? (
-                  <p className="text-[10px] theme-text-muted tabular-nums">
-                    ≈ {amountFiat}
-                  </p>
-                ) : (
-                  <span />
-                )}
-                <p className="text-[10px] theme-text-faint text-right">
-                  {formatSats(amountSats)} sats = {satsToBtc(amountSats)} BTC
-                </p>
-              </div>
-            )}
-          </div>
 
-          <div className="rounded-2xl bg-white p-4 mb-4">
-            {/*
-              Lightning invoices push this QR to ~70+ modules per side. Keep
-              the module size printable by rendering large and letting it
-              scale down — 320px at level "L" (7% EC, standard for BOLT11)
-              gives each module ≥4px on-screen and stays scannable from
-              another device's camera.
-            */}
-            <QRCode
-              value={qrValue}
-              size={320}
-              level="L"
-              style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
-            />
-          </div>
+            <button
+              onClick={() => void shareText(railLabel, railQr)}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-gray-900 transition-all active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg, #bef264, #84cc16)' }}
+            >
+              <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v12" />
+                <path d="M8 7l4-4 4 4" />
+                <path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+              </svg>
+              Share
+            </button>
 
-          <div className="w-full space-y-2">
-            <CopyRow
-              label="BIP21"
-              value={qrValue}
-              truncated={truncateMiddle(qrValue, 16, 12)}
-            />
-            <CopyRow label="BTC address" value={addresses.boarding_address} />
-            <CopyRow label="Ark address" value={addresses.ark_address} />
-            {ln.loading && (
-              <div className="flex items-center gap-3 rounded-xl theme-card px-4 py-2.5">
-                <div className="min-w-0">
-                  <p className="text-[10px] theme-text-muted mb-0.5">
-                    Lightning invoice
-                  </p>
-                  <p className="text-xs theme-text-faint">Generating...</p>
-                </div>
-                <svg
-                  className="h-4 w-4 shrink-0 animate-spin theme-text-faint"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-              </div>
-            )}
-            {ln.error && (
-              <div className="rounded-xl theme-card px-4 py-2.5">
-                <p className="text-[10px] theme-text-muted mb-0.5">
-                  Lightning invoice
-                </p>
-                <p className="text-xs theme-danger/70">{ln.error}</p>
-              </div>
-            )}
-            {lnInvoiceForQr && (
-              <CopyRow label="Lightning invoice" value={lnInvoiceForQr} />
-            )}
-            {!ln.loading &&
-              !lnInvoiceForQr &&
-              amountSats !== null &&
-              amountSats > 0 && (
-                <button
-                  onClick={() => ln.generate(amountSats)}
-                  className="w-full rounded-xl theme-warning-bg px-4 py-2.5 text-xs font-medium theme-warning hover:opacity-80 transition-colors"
-                >
-                  Generate Lightning invoice
-                </button>
-              )}
-          </div>
-        </div>
+            <div className="mt-2 w-full">
+              <AddressBar value={railAddress} label={railLabel} />
+            </div>
+          </>
+        )
       )}
-    </>
+    </div>
   );
 }
 
@@ -707,9 +842,9 @@ function ReceiveSheet({ open, onOpenChange, onReceived }: ReceiveSheetProps) {
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-40 bg-black/60" />
         <Drawer.Content
-          className="fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-3xl theme-drawer px-6 pt-6 pb-8 outline-none"
+          className="fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-3xl theme-drawer px-6 pt-5 pb-8 outline-none"
           style={{
-            height: 'calc(var(--app-height) * 0.85)',
+            height: 'calc(var(--app-height) * 0.9)',
             maxHeight: kbInset > 0 ? `calc(100dvh - ${kbInset}px - 16px)` : undefined,
             bottom: kbInset,
             paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 32px)',
@@ -717,11 +852,11 @@ function ReceiveSheet({ open, onOpenChange, onReceived }: ReceiveSheetProps) {
         >
           <Drawer.Handle className="mx-auto mb-4 h-1 w-10 rounded-full theme-drawer-handle" />
 
-          <Drawer.Title className="text-lg font-bold theme-text text-center mb-1">
+          <Drawer.Title className="font-display text-center text-[22px] tracking-wide theme-text">
             Receive
           </Drawer.Title>
-          <Drawer.Description className="text-xs theme-text-muted text-center mb-5">
-            Share an address to receive bitcoin
+          <Drawer.Description className="mb-5 mt-0.5 text-center text-xs theme-text-muted">
+            Scan or share to get paid in bitcoin
           </Drawer.Description>
 
           <div className="overflow-y-auto">

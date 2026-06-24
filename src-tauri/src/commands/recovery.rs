@@ -456,11 +456,15 @@ pub(crate) async fn refresh_unilateral_exit_cache_for_client(
 
     let result = build_exit_trees_best_effort(app, &client).await?;
 
+    let server_info = client
+        .server_info()
+        .map_err(|e| AppError::Wallet(format!("Failed to read ASP server info: {e}")))?;
+
     if result.branches.is_empty() && !result.failed_outpoints.is_empty() {
         return Ok(UnilateralExitCacheStatus {
             exists: false,
             generated_at: None,
-            network: Some(client.server_info.network.to_string()),
+            network: Some(server_info.network.to_string()),
             branch_count: 0,
             tx_count: 0,
             failed_count: result.failed_outpoints.len(),
@@ -484,12 +488,12 @@ pub(crate) async fn refresh_unilateral_exit_cache_for_client(
         .collect::<Vec<_>>();
 
     let last_error = result.last_error;
-    let (server_pk, _parity) = client.server_info.signer_pk.x_only_public_key();
+    let (server_pk, _parity) = server_info.signer_pk.x_only_public_key();
     let cache = UnilateralExitCache {
         version: CACHE_VERSION,
         generated_at: now_unix()?,
-        asp_digest: client.server_info.digest.clone(),
-        network: client.server_info.network.to_string(),
+        asp_digest: server_info.digest.clone(),
+        network: server_info.network.to_string(),
         server_pk: Some(server_pk.to_string()),
         branch_count: cached_branches.len(),
         tx_count,
@@ -497,8 +501,8 @@ pub(crate) async fn refresh_unilateral_exit_cache_for_client(
         branches: cached_branches,
         sweep_candidates: merge_sweep_candidates(result.sources.clone(), result.unrolled),
         branch_sources: result.sources,
-        exit_delay_seconds: exit_delay_to_seconds(client.server_info.unilateral_exit_delay),
-        dust_sat: Some(client.server_info.dust.to_sat()),
+        exit_delay_seconds: exit_delay_to_seconds(server_info.unilateral_exit_delay),
+        dust_sat: Some(server_info.dust.to_sat()),
     };
 
     let path = unilateral_exit_cache_path(app)?;
@@ -1488,9 +1492,171 @@ pub async fn unilateral_exit_sweep_status(
     })
 }
 
-/// The SDK's `send_on_chain` uses the same fixed fee; mirrored here so the
-/// offline path produces an identical transaction shape.
-const SWEEP_FEE: bitcoin::Amount = bitcoin::Amount::from_sat(1_000);
+/// Upper bound on VTXO owner-key derivation indices pre-derived into the local
+/// lookup map. Derivation is local-only (no network), so this is generous. It is
+/// only a *fast path*: when connected, a miss falls back to the live key
+/// provider's `get_keypair_for_pk`, which searches up to the wallet's real
+/// high-water mark — so there is no ceiling online. Offline (no live provider) a
+/// key beyond this bound is logged and skipped, since there's no cached
+/// high-water mark to search against.
+const MAX_VTXO_KEY_SCAN: u32 = 1_000;
+
+/// Relative (CSV) timelocks are enforced by consensus against a block's
+/// median-time-past, which lags wall-clock by up to ~2h. Maturity is judged
+/// against `now - MTP_SAFETY_MARGIN` so a sweep is never built that's final by
+/// wall-clock but non-final by MTP (which the relay would reject as non-BIP68).
+const MTP_SAFETY_MARGIN: Duration = Duration::from_secs(2 * 60 * 60);
+
+/// A single sweep input, reduced to the raw parts needed to build + sign the
+/// taproot exit-script spend (boarding outputs and unrolled VTXOs both reduce
+/// to this shape).
+struct SweepInput {
+    outpoint: bitcoin::OutPoint,
+    sequence: bitcoin::Sequence,
+    witness_utxo: bitcoin::TxOut,
+    exit_script: bitcoin::ScriptBuf,
+    control_block: bitcoin::taproot::ControlBlock,
+}
+
+/// Absolute fee for a sweep of `vsize` vbytes at `fee_rate_sat_vb`, floored at
+/// 1 sat/vB so it always clears the relay minimum. The SDK's `send_on_chain`
+/// (and `create_unilateral_exit_transaction`) reserve **no** fee — they send
+/// every input sat to the destination + change, producing a 0-fee tx the relay
+/// rejects ("min relay fee not met"). avark builds the sweep itself and sizes
+/// the fee from the live fee rate instead. See upstream-send-on-chain-fee-issue.md.
+fn sweep_fee(vsize: u64, fee_rate_sat_vb: f64) -> bitcoin::Amount {
+    let rate = if fee_rate_sat_vb.is_finite() && fee_rate_sat_vb > 1.0 {
+        fee_rate_sat_vb
+    } else {
+        1.0
+    };
+    bitcoin::Amount::from_sat(((vsize as f64) * rate).ceil() as u64)
+}
+
+/// Build and sign the sweep transaction. Mirrors ark-core's
+/// `create_unilateral_exit_transaction` (the proven taproot script-path
+/// signing sequence) but reserves `fee` from the change instead of producing a
+/// 0-fee transaction. Change below `dust` is dropped (rolled into the fee).
+fn build_sweep_tx<S>(
+    to_address: &bitcoin::Address,
+    to_amount: bitcoin::Amount,
+    change_address: &bitcoin::Address,
+    fee: bitcoin::Amount,
+    dust: bitcoin::Amount,
+    inputs: &[SweepInput],
+    sign_fn: S,
+) -> Result<Transaction, AppError>
+where
+    S: Fn(
+        &mut bitcoin::psbt::Input,
+        bitcoin::secp256k1::Message,
+    ) -> Result<
+        Vec<(
+            bitcoin::secp256k1::schnorr::Signature,
+            bitcoin::XOnlyPublicKey,
+        )>,
+        ark_core::Error,
+    >,
+{
+    use bitcoin::hashes::Hash as _;
+    use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
+    use bitcoin::taproot::TapLeafHash;
+
+    if inputs.is_empty() {
+        return Err(AppError::Wallet("No inputs to sweep".into()));
+    }
+
+    let total: bitcoin::Amount = inputs.iter().map(|i| i.witness_utxo.value).sum();
+    let spend = to_amount + fee;
+    let change = total.checked_sub(spend).ok_or_else(|| {
+        AppError::Wallet(format!(
+            "Insufficient funds for sweep: need {spend} (amount {to_amount} + fee {fee}), have {total}"
+        ))
+    })?;
+
+    let mut output = vec![bitcoin::TxOut {
+        value: to_amount,
+        script_pubkey: to_address.script_pubkey(),
+    }];
+    // Change below dust is uneconomical to create — leave it in the fee.
+    if change >= dust {
+        output.push(bitcoin::TxOut {
+            value: change,
+            script_pubkey: change_address.script_pubkey(),
+        });
+    }
+
+    let input = inputs
+        .iter()
+        .map(|i| bitcoin::TxIn {
+            previous_output: i.outpoint,
+            sequence: i.sequence,
+            ..Default::default()
+        })
+        .collect();
+
+    let mut psbt = bitcoin::psbt::Psbt::from_unsigned_tx(Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input,
+        output,
+    })
+    .map_err(|e| AppError::Wallet(format!("Failed to build sweep PSBT: {e}")))?;
+
+    // Attach witness_utxo + the taproot exit leaf for every input.
+    for (i, pin) in psbt.inputs.iter_mut().enumerate() {
+        let si = &inputs[i];
+        pin.witness_utxo = Some(si.witness_utxo.clone());
+        let leaf_version = si.control_block.leaf_version;
+        pin.tap_scripts.insert(
+            si.control_block.clone(),
+            (si.exit_script.clone(), leaf_version),
+        );
+    }
+
+    let prevouts = inputs
+        .iter()
+        .map(|i| i.witness_utxo.clone())
+        .collect::<Vec<_>>();
+    let secp = bitcoin::key::Secp256k1::new();
+
+    for (i, pin) in psbt.inputs.iter_mut().enumerate() {
+        let (control_block, (exit_script, leaf_version)) = pin
+            .tap_scripts
+            .pop_first()
+            .ok_or_else(|| AppError::Wallet(format!("No exit script for sweep input {i}")))?;
+
+        pin.witness_script = Some(exit_script.clone());
+
+        let leaf_hash = TapLeafHash::from_script(&exit_script, leaf_version);
+        let sighash = SighashCache::new(&psbt.unsigned_tx)
+            .taproot_script_spend_signature_hash(
+                i,
+                &Prevouts::All(&prevouts),
+                leaf_hash,
+                TapSighashType::Default,
+            )
+            .map_err(|e| AppError::Wallet(format!("Failed to compute sweep sighash: {e}")))?;
+        let msg = bitcoin::secp256k1::Message::from_digest(sighash.to_raw_hash().to_byte_array());
+
+        let sigs = sign_fn(pin, msg)
+            .map_err(|e| AppError::Wallet(format!("Failed to sign sweep input {i}: {e}")))?;
+
+        let mut witness: Vec<Vec<u8>> = Vec::new();
+        for (sig, pk) in sigs.iter() {
+            secp.verify_schnorr(sig, &msg, pk).map_err(|e| {
+                AppError::Wallet(format!("Sweep signature failed verification: {e}"))
+            })?;
+            witness.push(sig[..].to_vec());
+        }
+        witness.push(exit_script.as_bytes().to_vec());
+        witness.push(control_block.serialize());
+        pin.final_script_witness = Some(bitcoin::Witness::from_slice(&witness));
+    }
+
+    psbt.extract_tx()
+        .map_err(|e| AppError::Wallet(format!("Failed to extract sweep tx: {e}")))
+}
 
 /// Offline replica of the SDK's `Client::send_on_chain` (which hard-requires a
 /// connected client even though — per the SDK's own TODO — nothing about a
@@ -1502,15 +1668,19 @@ const SWEEP_FEE: bitcoin::Amount = bitcoin::Amount::from_sat(1_000);
 /// indices and checking esplora for on-chain history, stopping after a
 /// gap-limit run of unused keys — the esplora analogue of the SDK's
 /// ASP-backed `discover_keys`.
-async fn sweep_unrolled_offline(
+async fn sweep_unrolled(
     app: &tauri::AppHandle,
+    client: Option<Arc<ark::ArkClient>>,
+    // The live key provider when connected: its `get_keypair_for_pk` searches up
+    // to the wallet's real high-water mark (and hits the populated cache), so a
+    // VTXO whose owner key sits beyond MAX_VTXO_KEY_SCAN is still resolvable.
+    live_key_provider: Option<Arc<ark_client::Bip32KeyProvider>>,
     to_address: bitcoin::Address,
     to_amount: bitcoin::Amount,
 ) -> Result<Txid, AppError> {
     use ark_client::wallet::{BoardingWallet, OnchainWallet};
     use ark_client::{Blockchain as _, KeyProvider as _};
     use ark_core::script::extract_checksig_pubkeys;
-    use ark_core::unilateral_exit::{create_unilateral_exit_transaction, OnChainInput, VtxoInput};
     use ark_core::{ExplorerUtxo, Vtxo};
 
     let cache = read_cache(app).await?.ok_or_else(|| {
@@ -1563,20 +1733,25 @@ async fn sweep_unrolled_offline(
     // existing ones via discovery indices.
     let key_provider = ark_client::Bip32KeyProvider::new_with_index(xpriv, derivation_path, 0);
 
-    let target = to_amount + SWEEP_FEE;
     let now = Duration::from_secs(now_unix()? as u64);
+    // Conservative "now" for maturity: see MTP_SAFETY_MARGIN. Used for both
+    // boarding outputs and VTXOs so the two input classes apply one rule.
+    let mature_now = now.saturating_sub(MTP_SAFETY_MARGIN);
     let mut selected = bitcoin::Amount::ZERO;
 
-    // Boarding outputs first, mirroring the SDK's selection priority.
-    let mut onchain_inputs: Vec<OnChainInput> = Vec::new();
+    // Select *all* mature outputs rather than stopping at a fixed headroom: the
+    // network fee is sized dynamically below, and a fixed headroom (e.g. 1000
+    // sats) silently strands inputs whenever the real fee is larger, making a
+    // near-max sweep impossible exactly when fees are high. Each extra input adds
+    // far more value than its marginal fee, so taking them all maximises the
+    // headroom available to cover the fee. The requested amount is clamped to
+    // what's actually left after the fee.
+    let mut inputs: Vec<SweepInput> = Vec::new();
     for boarding_output in ctx
         .wallet
         .get_boarding_outputs()
         .map_err(|e| AppError::Wallet(format!("Failed to list boarding outputs: {e}")))?
     {
-        if selected >= target {
-            break;
-        }
         let utxos = tokio::time::timeout(
             ctx.timeout,
             ctx.blockchain.find_outpoints(boarding_output.address()),
@@ -1595,28 +1770,42 @@ async fn sweep_unrolled_offline(
             } = utxo
             {
                 if boarding_output.can_be_claimed_unilaterally_by_owner(
-                    now,
+                    mature_now,
                     Duration::from_secs(blocktime),
                     confirmations,
                 ) {
-                    onchain_inputs.push(OnChainInput::new(
-                        boarding_output.clone(),
-                        amount,
+                    let (exit_script, control_block) = boarding_output.exit_spend_info();
+                    inputs.push(SweepInput {
                         outpoint,
-                    ));
+                        sequence: boarding_output.exit_delay(),
+                        witness_utxo: bitcoin::TxOut {
+                            value: amount,
+                            script_pubkey: boarding_output.address().script_pubkey(),
+                        },
+                        exit_script,
+                        control_block,
+                    });
                     selected += amount;
                 }
             }
         }
     }
 
-    // Then unrolled VTXOs, discovered by deriving keys and asking esplora.
+    // Then unrolled VTXOs. Discovery is driven by the *cached sweep candidates*
+    // — the exact outpoints `unilateral_exit_sweep_status` surfaces to the UI —
+    // not an on-chain address scan. A virtual VTXO key has no on-chain history
+    // until it's unrolled, so a gap-limit scan keyed on on-chain presence bails
+    // (after DEFAULT_GAP_LIMIT empties) long before reaching an unrolled VTXO at
+    // a higher derivation index, finding nothing. We resolve each candidate's
+    // scriptPubKey to a VTXO, then its owner key to a derived keypair.
     let secp = bitcoin::key::Secp256k1::new();
     let mut keypairs: HashMap<bitcoin::XOnlyPublicKey, bitcoin::key::Keypair> = HashMap::new();
-    let mut vtxo_inputs: Vec<VtxoInput> = Vec::new();
-    let mut consecutive_unused = 0u32;
-    let mut index = 0u32;
-    while selected < target && consecutive_unused < ark_client::DEFAULT_GAP_LIMIT {
+
+    // owner pubkey -> keypair, for signing the exit-leaf spend. Derivation is
+    // local (no network), so the bound can be generous.
+    let mut owner_to_keypair: HashMap<bitcoin::XOnlyPublicKey, bitcoin::key::Keypair> =
+        HashMap::new();
+    for index in 0..MAX_VTXO_KEY_SCAN {
         let keypair = match key_provider
             .derive_at_discovery_index(index)
             .map_err(|e| AppError::Wallet(format!("Key derivation failed: {e}")))?
@@ -1624,62 +1813,166 @@ async fn sweep_unrolled_offline(
             Some(kp) => kp,
             None => break,
         };
-        index += 1;
+        owner_to_keypair.insert(keypair.x_only_public_key().0, keypair);
+    }
 
-        let owner_pk = keypair.x_only_public_key().0;
-        let vtxo = Vtxo::new_default(&secp, server_pk, owner_pk, exit_delay, network)
-            .map_err(|e| AppError::Wallet(format!("Failed to derive VTXO script: {e}")))?;
-
-        let utxos =
-            tokio::time::timeout(ctx.timeout, ctx.blockchain.find_outpoints(vtxo.address()))
-                .await
-                .map_err(|_| AppError::Wallet("Timed out querying VTXO outpoints".into()))?
-                .map_err(|e| AppError::Wallet(format!("Failed to query VTXO outpoints: {e}")))?;
-
-        if utxos.is_empty() {
-            consecutive_unused += 1;
-            continue;
-        }
-        consecutive_unused = 0;
-
-        for utxo in &utxos {
-            if let ExplorerUtxo {
-                outpoint,
-                amount,
-                confirmation_blocktime: Some(blocktime),
-                confirmations,
-                is_spent: false,
-            } = utxo
+    // scriptPubKey -> VTXO. When connected, use the client's authoritative
+    // address set (`get_offchain_addresses` — exactly what the SDK's own
+    // coin-selection uses), which covers every VTXO variant (default,
+    // delegator, custom scripts). Offline, fall back to reconstructing the
+    // default (2-leaf) VTXO per derived key — correct for ordinary receives,
+    // though it can't reproduce non-default scripts without the ASP.
+    let mut script_to_vtxo: HashMap<bitcoin::ScriptBuf, Vtxo> = HashMap::new();
+    match &client {
+        Some(client) => {
+            for (_, vtxo) in client
+                .get_offchain_addresses()
+                .map_err(|e| AppError::Wallet(format!("Failed to list offchain addresses: {e}")))?
             {
-                if vtxo.can_be_claimed_unilaterally_by_owner(
-                    now,
-                    Duration::from_secs(*blocktime),
-                    *confirmations,
-                ) {
-                    let spend_info = vtxo.exit_spend_info().map_err(|e| {
-                        AppError::Wallet(format!("Failed to derive exit spend info: {e}"))
-                    })?;
-                    vtxo_inputs.push(VtxoInput::new(
-                        *outpoint,
-                        vtxo.exit_delay(),
-                        bitcoin::TxOut {
-                            value: *amount,
-                            script_pubkey: vtxo.script_pubkey(),
-                        },
-                        spend_info,
-                    ));
-                    keypairs.insert(owner_pk, keypair);
-                    selected += *amount;
-                }
+                script_to_vtxo.insert(vtxo.script_pubkey(), vtxo);
+            }
+        }
+        None => {
+            for keypair in owner_to_keypair.values() {
+                let owner_pk = keypair.x_only_public_key().0;
+                let vtxo = Vtxo::new_default(&secp, server_pk, owner_pk, exit_delay, network)
+                    .map_err(|e| AppError::Wallet(format!("Failed to derive VTXO script: {e}")))?;
+                script_to_vtxo.insert(vtxo.script_pubkey(), vtxo);
             }
         }
     }
 
-    if selected < target {
-        return Err(AppError::Wallet(format!(
-            "Insufficient mature funds to sweep: found {selected}, need {target} \
-             (amount + {SWEEP_FEE} fee). Outputs still inside the exit delay are not selectable."
-        )));
+    let candidates = merge_sweep_candidates(cache.sweep_candidates, cache.branch_sources);
+    for candidate in &candidates {
+        let outpoint: bitcoin::OutPoint = match candidate.outpoint.parse() {
+            Ok(o) => o,
+            Err(e) => {
+                warn!(outpoint = %candidate.outpoint, %e, "invalid outpoint in recovery cache; skipping");
+                continue;
+            }
+        };
+
+        // The on-chain exit leaf: its scriptPubKey identifies the owner key, and
+        // its value is needed for the (taproot) sighash.
+        let tx = match tokio::time::timeout(ctx.timeout, ctx.blockchain.find_tx(&outpoint.txid))
+            .await
+            .map_err(|_| {
+                AppError::Wallet(format!("Timed out fetching exit leaf {}", outpoint.txid))
+            })?
+            .map_err(|e| {
+                AppError::Wallet(format!("Failed to fetch exit leaf {}: {e}", outpoint.txid))
+            })? {
+            Some(tx) => tx,
+            None => continue, // exit leaf not on-chain yet
+        };
+        let txout = match tx.output.get(outpoint.vout as usize) {
+            Some(o) => o.clone(),
+            None => {
+                warn!(outpoint = %candidate.outpoint, "cached outpoint vout out of range; skipping");
+                continue;
+            }
+        };
+
+        // Resolve the VTXO + its signing key first
+        let vtxo = match script_to_vtxo.get(&txout.script_pubkey) {
+            Some(v) => v,
+            None => {
+                warn!(
+                    outpoint = %candidate.outpoint,
+                    "no known VTXO matches this exit leaf; skipping (refresh while connected?)"
+                );
+                continue;
+            }
+        };
+        let owner_pk = vtxo.owner_pk();
+        // Fast path: the locally-derived 0..MAX_VTXO_KEY_SCAN map.
+        let keypair = match owner_to_keypair.get(&owner_pk).copied().or_else(|| {
+            live_key_provider
+                .as_ref()
+                .and_then(|kp| kp.get_keypair_for_pk(&owner_pk).ok())
+        }) {
+            Some(kp) => kp,
+            None => {
+                warn!(
+                    outpoint = %candidate.outpoint, %owner_pk,
+                    "no signing key for this VTXO's owner (beyond local scan window and \
+                     no live key provider); skipping"
+                );
+                continue;
+            }
+        };
+
+        // Already spent (our prior sweep, or a counterparty checkpoint) — not ours.
+        let spend_txid = tokio::time::timeout(
+            ctx.timeout,
+            ctx.blockchain
+                .get_output_status(&outpoint.txid, outpoint.vout),
+        )
+        .await
+        .map_err(|_| {
+            AppError::Wallet(format!(
+                "Timed out checking spend status for {}",
+                candidate.outpoint
+            ))
+        })?
+        .map_err(|e| {
+            AppError::Wallet(format!(
+                "Failed to check spend status for {}: {e}",
+                candidate.outpoint
+            ))
+        })?
+        .spend_txid;
+        if spend_txid.is_some() {
+            continue;
+        }
+
+        // The VTXO's *own* CSV exit delay must have elapsed — the same per-output
+        // rule the boarding path uses, against `mature_now` (MTP-margined), rather
+        // than the cached server-wide delay against raw wall-clock.
+        let confirmed_at =
+            tokio::time::timeout(ctx.timeout, ctx.blockchain.get_tx_status(&outpoint.txid))
+                .await
+                .map_err(|_| {
+                    AppError::Wallet(format!(
+                        "Timed out checking maturity for {}",
+                        candidate.outpoint
+                    ))
+                })?
+                .map_err(|e| {
+                    AppError::Wallet(format!(
+                        "Failed to check maturity for {}: {e}",
+                        candidate.outpoint
+                    ))
+                })?
+                .confirmed_at;
+        let confirmed = match confirmed_at {
+            Some(t) if t >= 0 => Duration::from_secs(t as u64),
+            _ => continue,
+        };
+        if !vtxo.can_be_claimed_unilaterally_by_owner(mature_now, confirmed, 0) {
+            continue;
+        }
+
+        let (exit_script, control_block) = vtxo
+            .exit_spend_info()
+            .map_err(|e| AppError::Wallet(format!("Failed to derive exit spend info: {e}")))?;
+        let value = txout.value;
+        inputs.push(SweepInput {
+            outpoint,
+            sequence: vtxo.exit_delay(),
+            witness_utxo: txout,
+            exit_script,
+            control_block,
+        });
+        keypairs.insert(owner_pk, keypair);
+        selected += value;
+    }
+
+    if inputs.is_empty() {
+        return Err(AppError::Wallet(
+            "No mature funds to sweep. Outputs still inside the exit delay are not selectable yet."
+                .into(),
+        ));
     }
 
     let change_address = ctx
@@ -1709,15 +2002,61 @@ async fn sweep_unrolled_offline(
         Ok(res)
     };
 
-    let tx = create_unilateral_exit_transaction(
-        to_address,
+    let dust = bitcoin::Amount::from_sat(dust_sat);
+
+    // Size the fee from the live fee rate. Build once at zero fee to measure the
+    // signed vsize (taproot script-path inputs dominate it). The probe amount is
+    // capped to `selected` so the build can't fail on an over-large output, and
+    // it keeps a change output so the probe is never smaller than the final tx
+    let probe_amount = to_amount.min(selected);
+    let probe = build_sweep_tx(
+        &to_address,
+        probe_amount,
+        &change_address,
+        bitcoin::Amount::ZERO,
+        dust,
+        &inputs,
+        &sign,
+    )?;
+    let vsize = probe.vsize() as u64;
+
+    // Surface an estimate failure instead of silently broadcasting at the
+    // relay-minimum: an under-priced emergency sweep can sit unconfirmed for a
+    // long time while the exit output stays exposed. If esplora is reachable
+    // enough to broadcast the sweep, it can answer this too (it retries
+    // internally), so failing here is a transient-retry signal, not a dead end.
+    let fee_rate = ctx.blockchain.get_fee_rate().await.map_err(|e| {
+        AppError::Wallet(format!(
+            "Couldn't estimate the network fee (block explorer unreachable): {e}. Try again."
+        ))
+    })?;
+    let fee = sweep_fee(vsize, fee_rate);
+
+    // Clamp the sent amount to what's actually left after the fee. A near-max
+    // request (the UI prefills total minus a rough buffer) then sends
+    // `selected - fee` with no change instead of failing when the real fee
+    // exceeds that buffer; a genuine partial request is sent as-is, the rest as
+    // change. Only a pool too small to cover fee + dust is a hard error.
+    let max_sendable = selected
+        .checked_sub(fee)
+        .filter(|a| *a >= dust)
+        .ok_or_else(|| {
+            AppError::Wallet(format!(
+                "Mature funds ({selected}) can't cover the network fee ({fee}) plus the dust \
+                 minimum. Wait for more outputs to mature."
+            ))
+        })?;
+    let to_amount = to_amount.min(max_sendable);
+
+    let tx = build_sweep_tx(
+        &to_address,
         to_amount,
-        change_address,
-        &onchain_inputs,
-        &vtxo_inputs,
-        sign,
-    )
-    .map_err(|e| AppError::Wallet(format!("Failed to build sweep transaction: {e}")))?;
+        &change_address,
+        fee,
+        dust,
+        &inputs,
+        &sign,
+    )?;
 
     let txid = tx.compute_txid();
     tokio::time::timeout(ctx.timeout, ctx.blockchain.broadcast(&tx))
@@ -1738,9 +2077,12 @@ async fn sweep_unrolled_offline(
 /// will accept the tx but it won't mine until the timelock elapses — so the
 /// caller should ideally only sweep mature outputs.
 ///
-/// Uses the SDK's `send_on_chain` when a connected client exists, and the
-/// offline replica otherwise — the sweep must work while the ASP is down,
-/// because that's the scenario the emergency-exit flow exists for.
+/// Always builds the sweep itself (the SDK's `send_on_chain` reserves no fee and
+/// broadcasts a 0-fee tx the relay rejects — "min relay fee not met"). When a
+/// live client exists it supplies the authoritative VTXO set (covering every
+/// address variant); otherwise the builder falls back to the recovery cache +
+/// esplora + locally-derived keys, so the sweep still works with the ASP down —
+/// the emergency-exit scenario the flow exists for.
 #[tauri::command(rename_all = "camelCase")]
 pub async fn sweep_unrolled_to_onchain(
     app: tauri::AppHandle,
@@ -1758,21 +2100,21 @@ pub async fn sweep_unrolled_to_onchain(
         .map_err(|e| AppError::Wallet(format!("Invalid network in wallet.json: {e}")))?;
     let btc_addr = super::send::parse_onchain_address(&address, network)?;
 
-    let client = {
+    let (client, key_provider) = {
         let state = app.state::<GlobalWalletState>();
         let guard = state.0.read().await;
-        guard.as_ref().map(|ws| Arc::clone(&ws.client))
+        match guard.as_ref() {
+            Some(ws) => (
+                Some(Arc::clone(&ws.client)),
+                Some(Arc::clone(&ws.key_provider)),
+            ),
+            None => (None, None),
+        }
     };
 
-    info!(address = %address, amount_sat, offline = client.is_none(), "sweeping unrolled VTXOs to onchain");
+    info!(address = %address, amount_sat, connected = client.is_some(), "sweeping unrolled VTXOs to onchain");
 
-    let txid = match client {
-        Some(client) => client
-            .send_on_chain(btc_addr, amount)
-            .await
-            .map_err(|e| AppError::Wallet(format!("Sweep failed: {e}")))?,
-        None => sweep_unrolled_offline(&app, btc_addr, amount).await?,
-    };
+    let txid = sweep_unrolled(&app, client, key_provider, btc_addr, amount).await?;
 
     info!(txid = %txid, "swept unrolled VTXOs");
     Ok(txid.to_string())
@@ -1787,6 +2129,24 @@ mod tests {
     fn txid(n: u8) -> Txid {
         use bitcoin::hashes::Hash as _;
         Txid::from_byte_array([n; 32])
+    }
+
+    #[test]
+    fn sweep_fee_scales_with_rate_and_size() {
+        // 150 vB at 10 sat/vB → 1500 sats.
+        assert_eq!(sweep_fee(150, 10.0), bitcoin::Amount::from_sat(1500));
+        // Rounds up to clear the relay minimum.
+        assert_eq!(sweep_fee(150, 1.5), bitcoin::Amount::from_sat(225));
+        assert_eq!(sweep_fee(151, 1.5), bitcoin::Amount::from_sat(227));
+    }
+
+    #[test]
+    fn sweep_fee_floors_at_one_sat_per_vbyte() {
+        // A degenerate/zero/sub-1 rate must never produce a below-relay fee:
+        // floor at vsize (1 sat/vB) so the tx always clears "min relay fee not met".
+        assert_eq!(sweep_fee(200, 0.0), bitcoin::Amount::from_sat(200));
+        assert_eq!(sweep_fee(200, 0.5), bitcoin::Amount::from_sat(200));
+        assert_eq!(sweep_fee(200, f64::NAN), bitcoin::Amount::from_sat(200));
     }
 
     fn node(id: u8, tx_type: ChainedTxType, spends: &[u8]) -> VtxoChain {

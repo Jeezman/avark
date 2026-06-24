@@ -10,6 +10,7 @@ function QrScannerView({ onScan, onClose }: QrScannerViewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onScanRef = useRef(onScan);
   const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     onScanRef.current = onScan;
@@ -86,20 +87,52 @@ function QrScannerView({ onScan, onClose }: QrScannerViewProps) {
         </div>
       ) : (
         <>
-          <div className="relative w-full aspect-square rounded-2xl overflow-hidden bg-black">
+          <div className="relative w-full aspect-square overflow-hidden rounded-3xl bg-black">
             <video
               ref={videoRef}
-              className="w-full h-full object-cover"
+              className="h-full w-full object-cover"
               playsInline
+              autoPlay
               muted
+              controls={false}
+              disablePictureInPicture
+              onPlaying={() => setReady(true)}
             />
+
+            {/* Silent black cover until the first camera frame — guards against
+                the native video poster/play button without a visible spinner. */}
+            {!ready && <div className="absolute inset-0 bg-black" />}
+
+            {/* Scan-frame guides */}
+            {ready && (
+              <div className="pointer-events-none absolute inset-0">
+                <div className="absolute inset-0 bg-black/20" />
+                <div className="absolute left-1/2 top-1/2 h-[62%] w-[62%] -translate-x-1/2 -translate-y-1/2">
+                  {(
+                    [
+                      'left-0 top-0 border-l-2 border-t-2 rounded-tl-xl',
+                      'right-0 top-0 border-r-2 border-t-2 rounded-tr-xl',
+                      'left-0 bottom-0 border-l-2 border-b-2 rounded-bl-xl',
+                      'right-0 bottom-0 border-r-2 border-b-2 rounded-br-xl',
+                    ] as const
+                  ).map((pos) => (
+                    <span
+                      key={pos}
+                      className={`absolute h-7 w-7 ${pos}`}
+                      style={{ borderColor: '#bef264' }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
+
           <p className="text-xs theme-text-muted">
-            Point camera at a QR code
+            {ready ? 'Point your camera at a QR code' : 'Allow camera access to scan'}
           </p>
           <button
             onClick={onClose}
-            className="rounded-xl theme-card-elevated px-6 py-2.5 text-sm font-medium theme-text hover:opacity-80 transition-colors"
+            className="rounded-xl theme-card-elevated px-6 py-2.5 text-sm font-medium theme-text transition-colors hover:opacity-80"
           >
             Cancel
           </button>
