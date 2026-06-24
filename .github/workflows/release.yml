@@ -210,6 +210,37 @@ jobs:
             find src-tauri/gen/android/app/build/outputs/apk -type f; exit 1; }
           mv "$APK" "artifacts/avark-$V-android-armeabi-v7a.apk"
 
+      - name: Build signed AAB (Play Store bundle)
+        env:
+          VITE_WALLETCONNECT_PROJECT_ID: ${{ vars.VITE_WALLETCONNECT_PROJECT_ID }}
+          VITE_DEFAULT_ASP_URL: ${{ vars.VITE_DEFAULT_ASP_URL }}
+          AVARK_SUBMITPACKAGE_URL: ${{ vars.AVARK_SUBMITPACKAGE_URL }}
+          AVARK_SUBMITPACKAGE_TOKEN: ${{ secrets.AVARK_SUBMITPACKAGE_TOKEN }}
+        run: |
+          # A single universal bundle carrying both ABIs (matching the
+          # rust-toolchain targets above). Play splits it into per-device APKs.
+          pnpm tauri android build --aab --target aarch64 --target armv7 -- --features vendored-openssl
+          V='${{ needs.resolve.outputs.version }}'
+          AAB=src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
+          if [ ! -f "$AAB" ]; then
+            echo "::warning::AAB not at expected path; searching outputs/bundle"
+            AAB=$(find src-tauri/gen/android/app/build/outputs/bundle -name '*.aab' | head -1)
+          fi
+          [ -n "$AAB" ] && [ -f "$AAB" ] || { echo "::error::no signed AAB produced"; \
+            find src-tauri/gen/android/app/build/outputs/bundle -type f 2>/dev/null; exit 1; }
+          mkdir -p aab
+          mv "$AAB" "aab/avark-$V-android.aab"
+
+      - name: Verify AAB is signed
+        run: |
+          V='${{ needs.resolve.outputs.version }}'
+          # AABs are jar-signed with the upload key; Play re-signs after upload.
+          # `jarsigner -verify` (JDK-bundled) exits non-zero on an unsigned/invalid
+          # bundle — don't pipe it, or the exit code would be masked. A self-signed
+          # release cert only triggers a warning (still exit 0), which is expected.
+          jarsigner -verify "aab/avark-$V-android.aab"
+          echo "AAB signature verified."
+
       - name: Verify signatures on every output APK
         run: |
           BT=$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)
@@ -234,6 +265,17 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
           # 14 days of runway between the android build and final publish.
+          retention-days: 14
+
+      # Uploaded as a *separate* artifact (not "android"), so the publish job —
+      # which only stages downloaded/android/* onto the GitHub release — leaves
+      # the AAB off the public release. It's not user-installable; download it
+      # from this run's artifacts and upload to the Play Console.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-aab
+          path: aab/*
+          if-no-files-found: error
           retention-days: 14
 
       - name: Clean up signing material
